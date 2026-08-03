@@ -242,9 +242,7 @@ const CLUBES_POR_COMPETICAO = {
                                 "zaga central", "banco central"] },
     "ASA", "Ferroviário", "Manaus", "Altos",
   ],
-"Paulista A2": ["Araçatuba", "Capivariano", "Ferroviária", "Grêmio Prudente", "Itapirense", "Ituano", "Linense", "Oeste", "Portuguesa Santista", "Primavera", "Rio Claro", "Santo André", "São Bento", "São Caetano", "Taubaté", "Votuporanguense"],
- 
- "Copa Paulista": [
+  "Copa Paulista": [
     "Comercial", "Francana", "Botafogo-SP", "Inter de Limeira",
     "União São João", "XV de Jaú", "Grêmio Prudente", "Linense",
     "Marília", "Monte Azul", "Noroeste", "Primavera",
@@ -297,13 +295,13 @@ const POSICOES = [
   { id: "le", label: "Lateral-esquerdo", busca: ["lateral"],
     termos: ["lateral-esquerdo", "lateral esquerdo", "lateral da esquerda", "ala-esquerdo", "lateral"],
     excluir: ["lateral-direito", "lateral direito", "lateral da direita", "ala-direito"] },
-  { id: "zag", label: "Zagueiro", busca: ["zagueiro", "zaga"],
+  { id: "zag", label: "Zagueiro", busca: ["zagueiro"],
     termos: ["zagueiro", "zaga", "defensor"] },
   { id: "vol", label: "Volante", busca: ["volante"],
     termos: ["volante", "primeiro volante", "cabeca de area"] },
-  { id: "mei", label: "Meia", busca: ["meia", "meio-campista"],
+  { id: "mei", label: "Meia", busca: ["meia"],
     termos: ["meia", "meio-campista", "camisa 10"] },
-  { id: "ata", label: "Atacante", busca: ["atacante", "centroavante"],
+  { id: "ata", label: "Atacante", busca: ["atacante"],
     termos: ["atacante", "centroavante", "ponta"] },
   { id: "gol", label: "Goleiro", busca: ["goleiro"],
     termos: ["goleiro", "arqueiro"] },
@@ -1101,6 +1099,7 @@ function Painel() {
         );
       }
       if (!j.ok) throw new Error("O script retornou erro: " + (j.erro || "sem detalhe"));
+      if (j.erro) setErro("A busca teve falhas: " + j.erro);
 
       // A ficha é clube + posição: o mesmo clube pode estar no radar por
       // lateral-direito e por goleiro, com elencos e notas separados.
@@ -1159,12 +1158,17 @@ function Painel() {
             " — a lista já foi reordenada"
           : (() => {
               const d = j.diagnostico || {};
-              const detalhe = d.brutas !== undefined
-                ? ` · o Google devolveu ${d.brutas}, sendo ${d.outroClube || 0} de outro clube, ` +
-                  `${d.outroLado || 0} do outro lado do campo, ` +
-                  `${d.semPosicao || 0} sem sinal na posição e ${d.jaVistas || 0} já mostradas antes`
-                : "";
-              return `Nada novo em ${alvos.length} clube(s)${detalhe}`;
+              const partes = [];
+              if (d.brutas !== undefined) partes.push(`o Google devolveu ${d.brutas}`);
+              if (d.outroClube) partes.push(`${d.outroClube} de outro clube`);
+              if (d.outroLado) partes.push(`${d.outroLado} do outro lado do campo`);
+              if (d.semPosicao) partes.push(`${d.semPosicao} sem sinal na posição`);
+              if (d.jaVistas) partes.push(`${d.jaVistas} já mostradas antes`);
+              if (d.httpRuim) partes.push(`${d.httpRuim} recusadas pelo Google (HTTP ${d.ultimoHttp})`);
+              if (d.semResposta) partes.push(`${d.semResposta} sem resposta`);
+              if (d.falhas) partes.push(`${d.falhas} falha(s) de rede`);
+              return `Nada novo em ${alvos.length} clube(s)` +
+                (partes.length ? ` · ${partes.join(", ")}` : "");
             })()
       );
     } catch (e) {
