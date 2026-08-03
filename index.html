@@ -60,15 +60,31 @@ var configurado =
 
 if (configurado) window.PG_URL = URL_PLANILHA;
 
-/* fetch que desiste sozinho — sem isso, uma planilha que não responde
-   deixa o painel preso em "Abrindo o quadro…" para sempre. */
+/* O Apps Script hiberna quando fica sem uso e a primeira chamada pode
+   levar mais de meio minuto para acordar. Damos prazo largo e uma
+   segunda tentativa antes de desistir — sem isso o painel ficaria
+   preso em "Abrindo o quadro…" ou acusaria falha à toa. */
 async function buscarComPrazo(url, opcoes, segundos) {
-  var ctrl = new AbortController();
-  var t = setTimeout(function () { ctrl.abort(); }, (segundos || 20) * 1000);
+  var prazo = (segundos || 35) * 1000;
+
+  async function tentar(ms) {
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, ms);
+    try {
+      return await fetch(url, Object.assign({}, opcoes || {}, { signal: ctrl.signal }));
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
   try {
-    return await fetch(url, Object.assign({}, opcoes || {}, { signal: ctrl.signal }));
-  } finally {
-    clearTimeout(t);
+    return await tentar(prazo);
+  } catch (e) {
+    if (e && e.name === "AbortError") {
+      bandeira("A planilha está acordando — tentando de novo…", "ok");
+      return await tentar(prazo);   // segunda e última tentativa
+    }
+    throw e;
   }
 }
 
@@ -83,7 +99,7 @@ window.storage = {
     }
 
     try {
-      var r = await buscarComPrazo(URL_PLANILHA, { method: "GET" }, 20);
+      var r = await buscarComPrazo(URL_PLANILHA, { method: "GET" }, 35);
       var j = await r.json();
       if (!j.ok) throw new Error(j.erro || "resposta inválida");
 
@@ -93,7 +109,7 @@ window.storage = {
     } catch (e) {
       bandeira(
         (e && e.name === "AbortError"
-          ? "A planilha demorou demais para responder. "
+          ? "A planilha não respondeu em dois minutos. "
           : "Sem conexão com a planilha. ") +
         "Mostrando a última cópia deste computador — NÃO edite até reconectar.",
         "erro"
@@ -115,7 +131,7 @@ window.storage = {
         // text/plain evita a checagem prévia que o Apps Script não responde
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ dados: JSON.parse(valor) })
-      }, 25);
+      }, 35);
       var j = await r.json();
       if (!j.ok) throw new Error(j.erro || "falha ao gravar");
       bandeira("Salvo na planilha", "ok");
@@ -577,9 +593,9 @@ function Painel() {
     const destravar = setTimeout(() => {
       if (vivo) {
         setCarregando(false);
-        setErro("A planilha não respondeu a tempo. Recarregue a página; se persistir, confira a implantação do Apps Script.");
+        setErro("A planilha não respondeu. Recarregue a página — o Apps Script costuma acordar na segunda tentativa.");
       }
-    }, 30000);
+    }, 100000);
 
     (async () => {
       try {
