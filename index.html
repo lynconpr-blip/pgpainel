@@ -1,0 +1,1963 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PG Assessoria — Painel Inteligência de Mercado</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='4' fill='%2316302B'/><text x='16' y='23' font-size='18' font-family='sans-serif' font-weight='bold' fill='%23E8A33D' text-anchor='middle'>P</text></svg>" />
+<style>
+  html, body { margin:0; padding:0; background:#16302B; }
+  #raiz { min-height:100vh; }
+  .aviso-topo { position:sticky; top:0; left:0; right:0; z-index:99; padding:8px 14px;
+    font-family:system-ui,sans-serif; font-size:12.5px; text-align:center; line-height:1.4; }
+  .aviso-topo.erro { background:#D6483B; color:#fff; }
+  .aviso-topo.ok   { background:#6E8F7B; color:#0E211D; }
+  .carregando, .falha { color:#EAF2EC; font-family:system-ui,sans-serif; padding:40px 24px;
+    line-height:1.6; max-width:64ch; }
+  .falha { color:#E8A33D; }
+  .falha code { background:rgba(255,255,255,.1); padding:2px 5px; border-radius:3px; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin></script>
+</head>
+<body>
+<div id="raiz"><div class="carregando">Abrindo o painel…</div></div>
+
+<script>
+/* ================================================================== *
+ *  CONFIGURAÇÃO — cole aqui o link do seu Apps Script                *
+ *  Deve terminar em /exec                                            *
+ * ================================================================== */
+var URL_PLANILHA = "https://script.google.com/macros/s/AKfycbyUfCWx2wyKuaGa3JcA5xqsGx4GzWDMZTMRxKBdonE_qkrTrsM6nVgZ4_xh64IjHHM/exec";
+
+
+
+/* ------------------------------------------------------------------ *
+ *  Armazenamento na planilha, com cópia local de segurança.
+ *  A cópia local serve para: (a) abrir rápido, (b) não perder nada
+ *  se a internet cair no meio de uma gravação.
+ * ------------------------------------------------------------------ */
+var CHAVE_LOCAL = "pg:painel-ld";
+
+function bandeira(texto, tipo) {
+  var d = document.getElementById("bandeira");
+  if (!d) {
+    d = document.createElement("div");
+    d.id = "bandeira";
+    document.body.insertBefore(d, document.body.firstChild);
+  }
+  d.className = "aviso-topo " + tipo;
+  d.textContent = texto;
+  if (tipo === "ok") setTimeout(function () { if (d) d.remove(); }, 2500);
+}
+
+window.PG_URL = null;
+
+var configurado =
+  URL_PLANILHA.indexOf("/exec") !== -1 &&
+  URL_PLANILHA.indexOf("COLE_AQUI") === -1;
+
+if (configurado) window.PG_URL = URL_PLANILHA;
+
+/* fetch que desiste sozinho — sem isso, uma planilha que não responde
+   deixa o painel preso em "Abrindo o quadro…" para sempre. */
+async function buscarComPrazo(url, opcoes, segundos) {
+  var ctrl = new AbortController();
+  var t = setTimeout(function () { ctrl.abort(); }, (segundos || 20) * 1000);
+  try {
+    return await fetch(url, Object.assign({}, opcoes || {}, { signal: ctrl.signal }));
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+window.storage = {
+  async get(chave) {
+    var local = localStorage.getItem(CHAVE_LOCAL);
+
+    if (!configurado) {
+      bandeira("Planilha não configurada: a linha URL_PLANILHA ainda está com o texto de exemplo. Edite o arquivo e publique de novo.", "erro");
+      if (local === null) throw new Error("sem registro");
+      return { key: chave, value: local };
+    }
+
+    try {
+      var r = await buscarComPrazo(URL_PLANILHA, { method: "GET" }, 20);
+      var j = await r.json();
+      if (!j.ok) throw new Error(j.erro || "resposta inválida");
+
+      var texto = JSON.stringify(j.dados);
+      localStorage.setItem(CHAVE_LOCAL, texto);
+      return { key: chave, value: texto };
+    } catch (e) {
+      bandeira(
+        (e && e.name === "AbortError"
+          ? "A planilha demorou demais para responder. "
+          : "Sem conexão com a planilha. ") +
+        "Mostrando a última cópia deste computador — NÃO edite até reconectar.",
+        "erro"
+      );
+      if (local === null) throw new Error("sem registro");
+      return { key: chave, value: local };
+    }
+  },
+
+  async set(chave, valor) {
+    // Grava local primeiro: nunca se perde o que acabou de ser digitado.
+    localStorage.setItem(CHAVE_LOCAL, valor);
+
+    if (!configurado) return { key: chave, value: valor };
+
+    try {
+      var r = await buscarComPrazo(URL_PLANILHA, {
+        method: "POST",
+        // text/plain evita a checagem prévia que o Apps Script não responde
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ dados: JSON.parse(valor) })
+      }, 25);
+      var j = await r.json();
+      if (!j.ok) throw new Error(j.erro || "falha ao gravar");
+      bandeira("Salvo na planilha", "ok");
+      return { key: chave, value: valor };
+    } catch (e) {
+      bandeira("Não consegui salvar na planilha. A alteração está neste computador — recarregue quando a conexão voltar.", "erro");
+      return { key: chave, value: valor };
+    }
+  }
+};
+
+if (!window.React) {
+  document.getElementById("raiz").innerHTML =
+    '<div class="falha"><b>Não consegui carregar as bibliotecas.</b><br>' +
+    'Este arquivo precisa de internet. Conecte-se e recarregue a página.</div>';
+}
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+/* ------------------------------------------------------------------ */
+/*  Painel de janelas — quadro tático magnético                        */
+/* ------------------------------------------------------------------ */
+
+const C = {
+  board: "#16302B",      // verde-quadro
+  boardDeep: "#0E211D",
+  ficha: "#F2EFE6",      // papel manilha claro
+  fichaEdge: "#D9D3C3",
+  ink: "#14201C",
+  giz: "#EAF2EC",
+  amber: "#E8A33D",      // refletor
+  alerta: "#D6483B",
+  calma: "#6E8F7B",
+};
+
+const HOJE = () => new Date().toISOString().slice(0, 10);
+
+const dias = (d) => {
+  if (!d) return null;
+  const ms = new Date(d + "T12:00:00") - new Date(HOJE() + "T12:00:00");
+  return Math.round(ms / 86400000);
+};
+
+/* Divisões nacionais — sempre visíveis no radar. */
+const NACIONAIS = [
+  { id: "n-a", nome: "Série A", grupo: "Nacional" },
+  { id: "n-b", nome: "Série B", grupo: "Nacional" },
+  { id: "n-c", nome: "Série C", grupo: "Nacional" },
+  { id: "n-d", nome: "Série D", grupo: "Nacional" },
+];
+
+/* Catálogo de competições estaduais, por UF.
+   Compilação de referência — confirme o calendário e o nome na federação
+   antes de usar como base para uma ligação. Faltando alguma, use
+   "outra competição" no fim do radar. */
+const ESTADUAIS = {
+  AC: ["Acreano", "Acreano 2ª Divisão", "Copa Acre"],
+  AL: ["Alagoano", "Alagoano 2ª Divisão", "Copa Alagoas"],
+  AM: ["Amazonense", "Amazonense 2ª Divisão", "Copa Amazonas"],
+  AP: ["Amapaense", "Copa Amapá"],
+  BA: ["Baiano Série A", "Baiano Série B", "Copa do Nordeste (seletiva)"],
+  CE: ["Cearense Série A", "Cearense Série B", "Cearense Série C", "Copa Fares Lopes"],
+  DF: ["Candango Série A", "Candango Série B", "Copa Verde (seletiva)"],
+  ES: ["Capixaba Série A", "Capixaba Série B", "Copa Espírito Santo"],
+  GO: ["Goiano Série A", "Goiano Série B", "Goiano Série C", "Copa Goiás"],
+  MA: ["Maranhense Série A", "Maranhense Série B", "Copa FMF"],
+  MG: ["Mineiro Módulo I", "Mineiro Módulo II", "Mineiro Segunda Divisão", "Copa Sul-Minas-Rio"],
+  MS: ["Sul-Mato-Grossense", "Sul-Mato-Grossense Série B", "Copa MS"],
+  MT: ["Mato-Grossense Série A", "Mato-Grossense Série B", "Copa FMF-MT"],
+  PA: ["Paraense Série A", "Paraense Série B", "Copa Grão-Pará"],
+  PB: ["Paraibano Série A", "Paraibano Série B", "Copa Paraíba"],
+  PE: ["Pernambucano Série A1", "Pernambucano Série A2", "Copa Pernambuco"],
+  PI: ["Piauiense Série A", "Piauiense Série B", "Copa Piauí"],
+  PR: ["Paranaense Série A", "Paranaense Série B", "Paranaense Série C", "Copa Paraná"],
+  RJ: ["Carioca Série A", "Carioca Série A2", "Carioca Série B1", "Copa Rio"],
+  RN: ["Potiguar Série A", "Potiguar Série B", "Copa Rio Grande do Norte"],
+  RO: ["Rondoniense", "Rondoniense Série B", "Copa Rondônia"],
+  RR: ["Roraimense", "Copa Roraima"],
+  RS: ["Gaúcho Série A", "Gaúcho Série A2 (Acesso)", "Gaúcho Série B", "Copa FGF"],
+  SC: ["Catarinense Série A", "Catarinense Série B", "Catarinense Série C", "Copa Santa Catarina"],
+  SE: ["Sergipano Série A", "Sergipano Série A2", "Copa Lotese"],
+  SP: ["Paulista A1", "Paulista A2", "Paulista A3", "Paulista Segunda Divisão", "Copa Paulista"],
+  TO: ["Tocantinense", "Tocantinense Série B", "Copa Tocantins"],
+};
+
+const UFS = Object.keys(ESTADUAIS);
+
+/* ==================================================================
+   PARTICIPANTES POR COMPETIÇÃO — edite à vontade.
+
+   A chave é exatamente o nome que aparece no seletor de competição.
+   Use o nome como a IMPRENSA escreve, não o de registro.
+
+   Cada clube pode ser:
+     "Joinville"                              — simples
+     { nome: "Central", evitar: ["zagueiro central"] }
+   O campo `evitar` descarta notícias que contenham aquelas expressões,
+   para nomes que se confundem com palavras comuns.
+   ================================================================== */
+const CLUBES_POR_COMPETICAO = {
+  "Série D": [
+    "Portuguesa-RJ", "Maricá", "Inter de Limeira", "Goiatuba",
+    "Ceilândia", "Luverdense", "Cianorte", "Joinville",
+    "Brasiliense", "Aparecidense", "Santa Cruz",
+    { nome: "Central", evitar: ["zagueiro central", "defensor central",
+                                "zaga central", "banco central"] },
+    "ASA", "Ferroviário", "Manaus", "Altos",
+  ],
+  "Copa Paulista": [
+    "Comercial", "Francana", "Botafogo-SP", "Inter de Limeira",
+    "União São João", "XV de Jaú", "Grêmio Prudente", "Linense",
+    "Marília", "Monte Azul", "Noroeste", "Primavera",
+    "Rio Branco-SP", "Santo André", "São Bento", "São José",
+  ],
+  "Copa Santa Catarina": [
+    { nome: "Barra", evitar: ["barra da tijuca", "barra funda",
+                              "barra mansa", "barra do"] },
+    "Blumenau", "Figueirense", "Hercílio Luz", "Joinville",
+    "Marcílio Dias", "Metropolitano", "Nação",
+    { nome: "Santa Catarina", evitar: ["clubes de santa catarina",
+                                       "estado de santa catarina",
+                                       "interior de santa catarina",
+                                       "federacao catarinense"] },
+  ],
+  "Copa Paraná": [
+    "Athletico", "Azuriz", "Cascavel", "Cianorte", "Foz do Iguaçu",
+    "Londrina", "Paraná Clube", "Paranavaí", "São Joseense",
+  ],
+  "Copa Paraíba": [
+    "Atlético-PB", "Campinense", "Esporte de Patos",
+    "Nacional de Patos", "Serra Branca", "Treze",
+  ],
+  "Copa Lotese": [
+    "América de Propriá", "Atlético Gloriense", "Desportiva Aracaju",
+    "Falcon", "Guarany", "Lagarto",
+  ],
+};
+
+/* Janelas de tempo aceitas pelo Google Notícias. */
+const PERIODOS = [
+  { v: "1d", label: "últimas 24 horas" },
+  { v: "7d", label: "últimos 7 dias" },
+  { v: "15d", label: "últimos 15 dias" },
+  { v: "1m", label: "último mês" },
+  { v: "3m", label: "último trimestre" },
+  { v: "6m", label: "último semestre" },
+  { v: "1y", label: "último ano" },
+];
+
+/* Posições que o radar sabe procurar. O primeiro termo de cada lista
+   é o que vai para a busca; os demais afinam o filtro dos títulos. */
+/* `busca` é o que se pergunta ao Google — precisa ser amplo, porque a
+   imprensa costuma escrever só "lateral". `termos` é o filtro fino,
+   aplicado depois sobre o título. */
+const POSICOES = [
+  { id: "ld", label: "Lateral-direito", busca: ["lateral"],
+    termos: ["lateral-direito", "lateral direito", "lateral da direita", "ala-direito", "lateral"],
+    excluir: ["lateral-esquerdo", "lateral esquerdo", "lateral da esquerda", "ala-esquerdo"] },
+  { id: "le", label: "Lateral-esquerdo", busca: ["lateral"],
+    termos: ["lateral-esquerdo", "lateral esquerdo", "lateral da esquerda", "ala-esquerdo", "lateral"],
+    excluir: ["lateral-direito", "lateral direito", "lateral da direita", "ala-direito"] },
+  { id: "zag", label: "Zagueiro", busca: ["zagueiro", "zaga"],
+    termos: ["zagueiro", "zaga", "defensor"] },
+  { id: "vol", label: "Volante", busca: ["volante"],
+    termos: ["volante", "primeiro volante", "cabeca de area"] },
+  { id: "mei", label: "Meia", busca: ["meia", "meio-campista"],
+    termos: ["meia", "meio-campista", "camisa 10"] },
+  { id: "ata", label: "Atacante", busca: ["atacante", "centroavante"],
+    termos: ["atacante", "centroavante", "ponta"] },
+  { id: "gol", label: "Goleiro", busca: ["goleiro"],
+    termos: ["goleiro", "arqueiro"] },
+];
+
+const rotuloPos = (id) =>
+  (POSICOES.find((p) => p.id === id) || {}).label || "posição";
+
+/* Normalizações de nome. Ficam fora do componente porque são usadas
+   já na primeira montagem do ranking. */
+const nomeSimples = (t) =>
+  (t || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+const normNome = (t) =>
+  nomeSimples(t)
+    .replace(/\b(futebol|clube|associacao|atletico|esporte|esportes|saf|ec|fc|ac|ge|se)\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
+
+
+/* Garante que as quatro divisões nacionais estejam sempre no radar,
+   preservando a data que o usuário já tenha preenchido — inclusive de
+   versões antigas do painel, onde a Série D vinha com outro nome. */
+function comNacionais(lista) {
+  const atual = Array.isArray(lista) ? lista : [];
+  const fixas = NACIONAIS.map((n) => {
+    const antiga = atual.find(
+      (c) =>
+        c.id === n.id ||
+        (c.nome || "").toLowerCase().startsWith(n.nome.toLowerCase())
+    );
+    return { ...n, janela: (antiga && antiga.janela) || "" };
+  });
+  const resto = atual.filter(
+    (c) =>
+      !NACIONAIS.some(
+        (n) =>
+          c.id === n.id ||
+          (c.nome || "").toLowerCase().startsWith(n.nome.toLowerCase())
+      )
+  );
+  return [...fixas, ...resto];
+}
+
+const STATUS_TITULAR = [
+  { v: "desconhecido", label: "não sei ainda", pts: 0 },
+  { v: "ok", label: "titular firme", pts: 0 },
+  { v: "improvisado", label: "improvisado na posição", pts: 25 },
+  { v: "suspenso", label: "suspenso / pendurado", pts: 18 },
+  { v: "lesionado", label: "lesionado", pts: 32 },
+  { v: "saiu", label: "rescindiu / foi vendido", pts: 36 },
+];
+
+const RESPOSTAS = [
+  { v: "nao_contatado", label: "não contatado" },
+  { v: "aguardando", label: "aguardando retorno" },
+  { v: "fechado", label: '"elenco fechado"' },
+  { v: "interesse", label: "demonstrou interesse" },
+  { v: "negociando", label: "negociando" },
+];
+
+/* -------- leitura do elenco de laterais-direitos ------------------ */
+/* Recebe [{nome, min}] e devolve o retrato da posição no clube.      */
+function elenco(c) {
+  const lds = (c.laterais || [])
+    .map((x) => ({
+      nome: (x.nome || "").trim(),
+      min: Number(x.min) || 0,
+      jogos: Number(x.jogos) || 0,
+    }))
+    .filter((x) => x.nome)
+    .map((x) => ({ ...x, media: x.jogos ? Math.round(x.min / x.jogos) : null }))
+    .sort((a, b) => b.min - a.min);
+
+  // Zero confirmado é diferente de "não mapeei ainda": a posição está
+  // literalmente vaga, e esse é o clube mais frágil que existe.
+  if (!lds.length) {
+    if (String(c.lds).trim() === "0") {
+      return { lds: [], total: 0, conc: 0, rodaram: 0, vazio: true,
+               perfil: "nenhum atleta na posição", uso: "", fragilidade: 80 };
+    }
+    return null;
+  }
+
+  const total = lds.reduce((a, b) => a + b.min, 0) || 1;
+  const rodaram = lds.filter((x) => x.min >= 300).length;
+  const conc = lds[0].min / total;
+  const m = lds[0].media;
+
+  let perfil, fragilidade;
+  if (lds.length === 1) {
+    perfil = "só um no elenco";
+    fragilidade = 30;
+  } else if (conc >= 0.85) {
+    perfil = "titular absoluto, reserva quase não joga";
+    fragilidade = 22;
+  } else if (conc >= 0.65) {
+    perfil = "titular claro com reserva de apoio";
+    fragilidade = 10;
+  } else {
+    perfil = "revezamento — dois rodando";
+    fragilidade = 0;
+  }
+
+  // A média por jogo separa quem joga os 90 de quem entra e sai.
+  let uso = "";
+  if (m !== null) {
+    if (m >= 80) {
+      uso = `joga os 90 (${m} min/jogo)`;
+      fragilidade += 8;   // sai ele, não há quem faça o mesmo
+    } else if (m >= 55) {
+      uso = `titular que costuma ser substituído (${m} min/jogo)`;
+    } else if (m >= 25) {
+      uso = `entra e sai (${m} min/jogo)`;
+      fragilidade -= 6;   // o clube já divide a posição
+    } else {
+      uso = `pouco usado (${m} min/jogo)`;
+      fragilidade -= 6;
+    }
+  }
+
+  if (rodaram >= 3) fragilidade -= 8;
+
+  return { lds, total, conc, rodaram, perfil, uso, fragilidade };
+}
+
+/* Casa o nome do BID com um lateral do elenco.                       */
+/* O BID traz nome de registro; o ogol, o nome popular. Comparamos    */
+/* por partes do nome — duas coincidências bastam.                    */
+function casaNome(a, b) {
+  const partes = (t) =>
+    (t || "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter((x) => x.length > 2 && !["dos","das","de","da","do","junior","filho","neto"].includes(x));
+  const A = partes(a), B = partes(b);
+  if (!A.length || !B.length) return false;
+  const iguais = A.filter((x) => B.includes(x)).length;
+  return iguais >= 2 || (B.length === 1 && A.includes(B[0]));
+}
+
+/* O nome do atleta aparece dentro do título da notícia?               */
+/* Diferente do BID: aqui procuramos o nome dentro de uma frase.       */
+function nomeNoTexto(nome, texto) {
+  const limpa = (t) =>
+    (t || "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  const alvo = limpa(texto);
+  const partes = limpa(nome)
+    .split(/[^a-z]+/)
+    .filter((x) => x.length > 2 && !["dos","das","de","da","do","junior","filho","neto"].includes(x));
+  if (!partes.length) return false;
+  // Nome de uma palavra só ("Ariel") precisa bater como palavra inteira.
+  return partes.every((x) => new RegExp(`\\b${x}\\b`).test(alvo));
+}
+
+function score(c) {
+  let s = 0;
+  const d = dias(c.janelaAte);
+  const e = elenco(c);
+
+  // Janela regulamentar
+  if (d !== null) {
+    if (d < 0) s -= 40;
+    else if (d <= 7) s += 34;
+    else if (d <= 21) s += 26;
+    else if (d <= 45) s += 16;
+    else s += 8;
+  }
+
+  // Estrutura da posição no elenco
+  if (e) {
+    s += e.fragilidade;
+  } else {
+    s -= 6; // elenco não mapeado — investigue antes de ligar
+  }
+
+  // Sinais importados, com decaimento no tempo
+  for (const sig of c.sinais || []) {
+    const idadeSinal = sig.quando ? -dias(sig.quando) : 99;
+    const decai = idadeSinal <= 2 ? 1 : idadeSinal <= 7 ? 0.6 : idadeSinal <= 21 ? 0.3 : 0.1;
+    let peso = Number(sig.peso) || 0;
+
+    // Rescisão do BID: só vale se o nome bater com um lateral do elenco
+    if (sig.fonte === "BID" && peso > 0 && sig.atleta) {
+      if (!e) {
+        peso = peso * 0.5;            // sem elenco mapeado, sinal só indicativo
+      } else {
+        const i = e.lds.findIndex((x) => casaNome(sig.atleta, x.nome));
+        if (i === 0) peso = 55;       // saiu o titular — vaga crítica
+        else if (i > 0) peso = 22;    // saiu o reserva
+        else peso = -8;               // não era lateral: ruído, tira do topo
+      }
+    }
+
+    // Notícia: se o título cita um lateral que você cadastrou, o peso
+    // passa a depender de QUEM é — titular ou reserva.
+    if (sig.fonte !== "BID" && e && sig.texto && peso > 0) {
+      const i = e.lds.findIndex((x) => nomeNoTexto(x.nome, sig.texto));
+      if (i === 0) {
+        peso = Math.max(peso, 50);
+        sig.quem = e.lds[0].nome + " (titular)";
+      } else if (i > 0) {
+        peso = Math.min(peso, 12);
+        sig.quem = e.lds[i].nome + " (reserva)";
+      }
+    }
+    s += peso * decai;
+  }
+
+  // Evento no titular, quando você anotou à mão
+  const temBid = (c.sinais || []).some((x) => x.fonte === "BID");
+  if (!temBid || c.statusTitular === "improvisado")
+    s += (STATUS_TITULAR.find((x) => x.v === c.statusTitular) || {}).pts || 0;
+
+  // Histórico de contato
+  const desde = c.ultimoContato ? -dias(c.ultimoContato) : null;
+  if (c.resposta === "interesse") s += 20;
+  if (c.resposta === "negociando") s += 26;
+  if (c.resposta === "fechado") s += desde !== null && desde >= 21 ? 6 : -14;
+
+  return Math.max(0, Math.round(s));
+}
+
+function faixa(s) {
+  if (s >= 70) return { label: "ligar hoje", cor: C.alerta };
+  if (s >= 45) return { label: "esta semana", cor: C.amber };
+  if (s >= 20) return { label: "monitorar", cor: C.calma };
+  return { label: "frio", cor: "#8A8A80" };
+}
+
+const novoClube = () => ({
+  id: Math.random().toString(36).slice(2, 9),
+  clube: "",
+  uf: "",
+  competicao: "",
+  janelaAte: "",
+  lds: "",
+  titular: "",
+  statusTitular: "desconhecido",
+  ultimoContato: "",
+  resposta: "nao_contatado",
+  proximo: "",
+  notas: "",
+  posicao: "ld",
+  sinais: [],
+  laterais: [],
+});
+
+
+function Painel() {
+  const [clubes, setClubes] = useState([]);
+  const [comps, setComps] = useState(comNacionais([]));
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [filtro, setFiltro] = useState("");
+  const [colando, setColando] = useState(false);
+  const [bulk, setBulk] = useState("");
+  const [aberto, setAberto] = useState(null);
+  const [pagina, setPagina] = useState(0);
+  const [filtroPos, setFiltroPos] = useState("");
+  const [filtroComp, setFiltroComp] = useState("");
+  const [consulta, setConsulta] = useState(null);
+  const [bidTexto, setBidTexto] = useState("");
+  const [colarBid, setColarBid] = useState(false);
+  const [buscando, setBuscando] = useState(false);
+  const [popBusca, setPopBusca] = useState(false);
+  const [posBusca, setPosBusca] = useState("ld");
+  const [ufBusca, setUfBusca] = useState("");
+  const [compBusca, setCompBusca] = useState("");
+  const [periodoBusca, setPeriodoBusca] = useState("7d");
+  const [backupTexto, setBackupTexto] = useState("");
+  const [colarBackup, setColarBackup] = useState(false);
+  const [textoColado, setTextoColado] = useState("");
+  const [ufSel, setUfSel] = useState("");
+  const [compSel, setCompSel] = useState("");
+  const [outra, setOutra] = useState(false);
+  const [outraNome, setOutraNome] = useState("");
+
+  useEffect(() => {
+    let vivo = true;
+
+    // Rede de segurança: aconteça o que acontecer, a tela sai do
+    // "Abrindo o quadro…" em 30 segundos.
+    const destravar = setTimeout(() => {
+      if (vivo) {
+        setCarregando(false);
+        setErro("A planilha não respondeu a tempo. Recarregue a página; se persistir, confira a implantação do Apps Script.");
+      }
+    }, 30000);
+
+    (async () => {
+      try {
+        const r = await window.storage.get("painel-ld");
+        if (r && vivo) {
+          const d = JSON.parse(r.value);
+          setClubes(d.clubes || []);
+          setComps(comNacionais(d.comps));
+        }
+      } catch (e) {
+        /* primeira vez, ou planilha fora do ar */
+      }
+      if (vivo) {
+        clearTimeout(destravar);
+        setCarregando(false);
+      }
+    })();
+
+    return () => { vivo = false; clearTimeout(destravar); };
+  }, []);
+
+  const salvar = async (next) => {
+    try {
+      await window.storage.set("painel-ld", JSON.stringify(next));
+      setErro("");
+    } catch (e) {
+      setErro("Não deu para salvar agora. Suas edições continuam na tela, mas exporte o CSV antes de fechar.");
+    }
+  };
+
+  const commit = (patch) => {
+    const next = { clubes, comps, ...patch };
+    if (patch.clubes) setClubes(patch.clubes);
+    if (patch.comps) { patch.comps = comNacionais(patch.comps); setComps(patch.comps); }
+    salvar(next);
+  };
+
+  const editar = (id, campo, valor) =>
+    commit({ clubes: clubes.map((c) => (c.id === id ? { ...c, [campo]: valor } : c)) });
+
+  const ordenados = useMemo(() => {
+    const f = filtro.trim().toLowerCase();
+
+    if (!consulta) return [];
+    const { pos: qPos, comp: qComp } = consulta;
+
+    const reais = clubes
+      .map((c) => ({ ...c, _s: score(c) }))
+      .filter((c) => !qPos || (c.posicao || "ld") === qPos)
+      .filter((c) => !qComp || c.competicao === qComp);
+
+    // Com uma competição filtrada, os participantes que ainda não têm ficha
+    // entram como fantasmas em zero — assim você vê a competição inteira.
+    let fantasmas = [];
+    if (qComp && CLUBES_POR_COMPETICAO[qComp]) {
+      const jaTem = new Set(reais.map((c) => normNome(c.clube)));
+      fantasmas = CLUBES_POR_COMPETICAO[qComp]
+        .map((x) => (typeof x === "string" ? x : x.nome))
+        .filter((nome) => !jaTem.has(normNome(nome)))
+        .map((nome) => ({
+          id: "fantasma-" + normNome(nome),
+          clube: nome,
+          uf: "",
+          competicao: qComp,
+          posicao: qPos || "ld",
+          sinais: [],
+          laterais: [],
+          notas: "",
+          _s: 0,
+          _fantasma: true,
+        }));
+    }
+
+    return [...reais, ...fantasmas]
+      .filter((c) =>
+        !f ||
+        [c.clube, c.uf, c.competicao, c.titular, c.notas].join(" ").toLowerCase().includes(f)
+      )
+      .sort((a, b) => b._s - a._s || a.clube.localeCompare(b.clube));
+  }, [clubes, filtro, consulta]);
+
+  /* Competições presentes nas fichas — alimenta o filtro do ranking. */
+  const compsNoRanking = useMemo(
+    () => [...new Set(clubes.map((c) => c.competicao).filter(Boolean))].sort(),
+    [clubes]
+  );
+
+  /* Posições presentes nas fichas, com a contagem de cada uma. */
+  const posNoRanking = useMemo(() => {
+    const m = new Map();
+    for (const c of clubes) {
+      const k = c.posicao || "ld";
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [clubes]);
+
+  const importar = () => {
+    const linhas = bulk.split("\n").map((l) => l.trim()).filter(Boolean);
+    const novos = linhas.map((l) => {
+      const [clube, uf, competicao] = l.split(/[;,]/).map((x) => (x || "").trim());
+      return { ...novoClube(), clube, uf: uf || "", competicao: competicao || "" };
+    });
+    commit({ clubes: [...clubes, ...novos] });
+    setBulk("");
+    setColando(false);
+  };
+
+  /* ---- importação dos CSVs gerados pelos scripts ---------------- */
+
+  const lerCSV = (txt) => {
+    const linhas = txt.replace(/^\uFEFF/, "").trim().split(/\r?\n/);
+    if (linhas.length < 2) return [];
+    const sep = linhas[0].includes(";") ? ";" : ",";
+    const cab = linhas[0].split(sep).map((h) => h.trim());
+    return linhas.slice(1).map((l) => {
+      const v = l.split(sep);
+      return Object.fromEntries(cab.map((h, i) => [h, (v[i] || "").trim()]));
+    });
+  };
+
+  const dataBR = (t) => {
+    if (!t) return "";
+    const m = t.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    const iso = t.match(/(\d{4})-(\d{2})-(\d{2})/);
+    return iso ? iso[0] : "";
+  };
+
+  const importarCSV = async (arquivo) => {
+    const texto = await arquivo.text();
+    const linhas = lerCSV(texto);
+    if (!linhas.length) {
+      setErro("Não consegui ler esse arquivo. Use os CSVs gerados pelos scripts.");
+      return;
+    }
+
+    const cols = Object.keys(linhas[0]);
+    const tem = (...n) => n.some((x) => cols.includes(x));
+    const eBid = tem("situacao", "tipo_bid", "atleta", "leitura");
+    const eNoticia = tem("sinais", "titulo", "pontos");
+    if (!eBid && !eNoticia) {
+      setErro(
+        "Não reconheci as colunas deste CSV: " +
+          cols.join(", ") +
+          ". Se for um arquivo antigo, apague-o no Colab e rode o filtro de novo."
+      );
+      return;
+    }
+
+    const mapa = new Map(clubes.map((c) => [normNome(c.clube), { ...c }]));
+    let novosClubes = 0, novosSinais = 0;
+
+    for (const l of linhas) {
+      const nome = (l.clube || "").trim();
+      if (!nome) continue;
+      const k = normNome(nome);
+
+      let c = mapa.get(k);
+      if (!c) {
+        c = { ...novoClube(), clube: nome, uf: l.uf || "" };
+        mapa.set(k, c);
+        novosClubes++;
+      }
+      c.sinais = c.sinais || [];
+
+      let sig;
+      if (eBid) {
+        const sit =
+          l.situacao ||
+          { RESCISAO: "VAGA ABERTA", SAIDA: "SAIDA", ENTRADA: "ENTRADA" }[l.tipo] ||
+          "OUTRO";
+        const peso = { "VAGA ABERTA": 30, SAIDA: 16, ENTRADA: -12 }[sit] ?? 0;
+        sig = {
+          fonte: "BID",
+          quando: dataBR(l.publicacao) || dataBR(l.data_consulta),
+          peso,
+          atleta: (l.atleta || "").trim(),
+          texto: `${sit} — ${l.atleta || l.linha || ""}${l.idade ? `, ${l.idade} anos` : ""}`,
+          link: "",
+        };
+        if (sit === "VAGA ABERTA" && c.statusTitular === "desconhecido")
+          c.statusTitular = "saiu";
+      } else {
+        const sinais = l.sinais || "";
+        sig = {
+          fonte: l.fonte || "notícia",
+          quando: dataBR(l.data) || HOJE(),
+          peso: Math.min(Number(l.pontos) || 0, 6) * 4,
+          texto: l.titulo || "",
+          link: l.link || "",
+        };
+        if (c.statusTitular === "desconhecido") {
+          if (/lesao/.test(sinais)) c.statusTitular = "lesionado";
+          else if (/rescisao/.test(sinais)) c.statusTitular = "saiu";
+          else if (/suspensao/.test(sinais)) c.statusTitular = "suspenso";
+        }
+      }
+
+      const jaTem = c.sinais.some(
+        (x) => x.texto === sig.texto && x.fonte === sig.fonte
+      );
+      if (!jaTem && sig.texto) {
+        c.sinais.push(sig);
+        novosSinais++;
+      }
+    }
+
+    commit({ clubes: [...mapa.values()] });
+    setErro("");
+    setAviso(
+      `${novosSinais} ${novosSinais === 1 ? "sinal novo" : "sinais novos"}` +
+        (novosClubes ? ` · ${novosClubes} clube(s) criado(s)` : "")
+    );
+  };
+
+  const baixarBackup = () => {
+    const dados = JSON.stringify({ versao: 1, quando: HOJE(), clubes, comps });
+    setBackupTexto(dados);
+    setColarBackup(false);
+    // Alguns ambientes bloqueiam download de arquivo; se falhar, o texto
+    // abaixo continua servindo para copiar.
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([dados], { type: "application/json" }));
+      a.download = `backup-painel-${HOJE()}.json`;
+      a.click();
+    } catch (e) { /* sem download: use o texto */ }
+  };
+
+  const restaurarBackup = async (origem) => {
+    try {
+      const bruto = typeof origem === "string" ? origem : await origem.text();
+      const d = JSON.parse(bruto);
+      if (!Array.isArray(d.clubes)) throw new Error("formato");
+      const vindos = d.clubes.map((c) => ({ ...novoClube(), ...c }));
+
+      // Funde com o que já existe: mesmo clube não vira ficha duplicada.
+      const mapa = new Map(clubes.map((c) => [normNome(c.clube), { ...c }]));
+      let novos = 0, fundidos = 0;
+      for (const v of vindos) {
+        const k = normNome(v.clube);
+        const atual = mapa.get(k);
+        if (!atual) { mapa.set(k, v); novos++; continue; }
+        fundidos++;
+        atual.laterais = (atual.laterais || []).length ? atual.laterais : v.laterais || [];
+        const chaves = new Set((atual.sinais || []).map((x) => x.fonte + "|" + x.texto));
+        for (const sg of v.sinais || [])
+          if (!chaves.has(sg.fonte + "|" + sg.texto)) (atual.sinais = atual.sinais || []).push(sg);
+        for (const campo of ["competicao", "janelaAte", "titular", "ultimoContato", "proximo", "notas", "uf"])
+          if (!atual[campo] && v[campo]) atual[campo] = v[campo];
+      }
+
+      commit({ clubes: [...mapa.values()], comps: comNacionais(d.comps || comps) });
+      setErro("");
+      setAviso(`Backup restaurado — ${novos} ficha(s) nova(s), ${fundidos} atualizada(s)`);
+      setColarBackup(false);
+      setBackupTexto("");
+      setTextoColado("");
+    } catch (e) {
+      setErro("Não consegui ler esse backup. Cole o texto inteiro gerado pelo botão Backup, do { ao }.");
+    }
+  };
+
+  /* ---- leitura do BID colado direto no painel -------------------- */
+
+  const BLOCO_BID = new RegExp(
+    "([^\\n]+)\\n+" +
+    "N.{0,3} de Contrato:\\s*(\\S*)\\n+" +
+    "Tipo Contrato:\\s*([^\\n]*)\\n+" +
+    "Publica..o:\\s*([^\\n]*)\\n+" +
+    "Data In.cio:\\s*([^\\n]*)\\n+" +
+    "Inscri..o:\\s*([^\\n]*)\\n+" +
+    "Apelido:\\s*([^\\n]*)\\n+" +
+    "Nascimento:\\s*([^\\n]*)\\n+" +
+    "[ \\t]*([^\\n]+)",
+    "g"
+  );
+
+  const SIT_BID = [
+    { termos: ["rescis", "termino de contrato", "encerramento", "baixa", "desligamento"],
+      sit: "VAGA ABERTA", peso: 30 },
+    { termos: ["transferencia", "cessao", "emprestimo"], sit: "SAIDA", peso: 16 },
+    { termos: ["contrato", "registro", "renovacao", "prorrogacao", "inscricao"],
+      sit: "ENTRADA", peso: -12 },
+  ];
+
+  const processarBid = () => {
+    const texto = bidTexto;
+    if (!texto.trim()) return;
+
+    BLOCO_BID.lastIndex = 0;
+    const registros = [];
+    let m;
+    while ((m = BLOCO_BID.exec(texto)) !== null) {
+      const nomeAtleta = m[1].trim();
+      const tipo = m[3].trim();
+      const publicacao = m[4].trim();
+      const nascimento = m[8].trim();
+      const clubeBruto = m[9].trim();
+
+      // "Figueirense - SC" -> nome + UF
+      const mc = clubeBruto.match(/^(.*?)\s*-\s*([A-Z]{2})$/);
+      const nomeClube = (mc ? mc[1] : clubeBruto).trim();
+      const uf = mc ? mc[2] : "";
+
+      const cn = normNome(nomeClube);
+      if (/^(liga|federacao|comarca)/.test(nomeClube.toLowerCase())) continue;
+      if (!cn) continue;
+
+      const t = nomeSimples(tipo);
+      if (t.includes("vinculo nao profissional") || t.includes("liberar")) continue;
+
+      let sit = "OUTRO", peso = 0;
+      for (const r of SIT_BID) {
+        if (r.termos.some((x) => t.includes(x))) { sit = r.sit; peso = r.peso; break; }
+      }
+      if (sit === "OUTRO") continue;
+
+      // idade a partir da data de nascimento
+      let idade = null;
+      const dn = nascimento.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      if (dn) {
+        const hoje = new Date();
+        idade = hoje.getFullYear() - Number(dn[3]);
+        const passou =
+          hoje.getMonth() + 1 > Number(dn[2]) ||
+          (hoje.getMonth() + 1 === Number(dn[2]) && hoje.getDate() >= Number(dn[1]));
+        if (!passou) idade--;
+      }
+      if (idade !== null && (idade < 18 || idade > 40)) continue;
+
+      registros.push({ clube: nomeClube, uf, sit, peso, atleta: nomeAtleta, idade,
+                       publicacao, tipo });
+    }
+
+    if (!registros.length) {
+      setErro("Não reconheci nenhum registro. Copie a lista inteira de resultados do BID.");
+      return;
+    }
+
+    // Um sinal do BID vale para todas as fichas daquele clube, em qualquer
+    // posição — o BID não informa em que posição o atleta jogava.
+    const mapa = new Map(clubes.map((c) => [c.id, { ...c }]));
+    let aplicados = 0, novas = 0;
+
+    for (const r of registros) {
+      const alvo = [...mapa.values()].filter((c) => normNome(c.clube) === normNome(r.clube));
+      const destinos = alvo.length ? alvo : [null];
+
+      for (const d of destinos) {
+        let c = d;
+        if (!c) {
+          c = { ...novoClube(), clube: r.clube, uf: r.uf, posicao: filtroPos || "ld" };
+          mapa.set(c.id, c);
+          novas++;
+        }
+        c.sinais = c.sinais || [];
+        const sig = {
+          fonte: "BID",
+          quando: dataBR(r.publicacao) || HOJE(),
+          peso: r.peso,
+          atleta: r.atleta,
+          texto: `${r.sit} — ${r.atleta}${r.idade ? `, ${r.idade} anos` : ""}`,
+          link: "",
+        };
+        if (c.sinais.some((x) => x.fonte === "BID" && x.texto === sig.texto)) continue;
+        c.sinais.push(sig);
+        aplicados++;
+        if (r.sit === "VAGA ABERTA" && c.statusTitular === "desconhecido")
+          c.statusTitular = "saiu";
+      }
+    }
+
+    commit({ clubes: [...mapa.values()] });
+    setBidTexto("");
+    setColarBid(false);
+    setErro("");
+    setAviso(
+      `BID lido: ${registros.length} movimentação(ões) profissional(is) · ` +
+      `${aplicados} sinal(is) aplicado(s)` + (novas ? ` · ${novas} clube(s) novo(s)` : "")
+    );
+  };
+
+  /* ---- trazer uma competição inteira para o radar ---------------- */
+
+  const importarCompeticao = () => {
+    if (!alvosDaBusca.length) {
+      setErro("Escolha uma competição que tenha participantes cadastrados.");
+      return;
+    }
+
+    const chaveFicha = (nome, pos) => normNome(nome) + "|" + (pos || "ld");
+    const mapa = new Map(clubes.map((c) => [chaveFicha(c.clube, c.posicao), { ...c }]));
+    let criadas = 0;
+
+    for (const alvo of alvosDaBusca) {
+      const k = chaveFicha(alvo.clube, posBusca);
+      if (mapa.has(k)) continue;
+      mapa.set(k, {
+        ...novoClube(),
+        clube: alvo.clube,
+        posicao: posBusca,
+        uf: alvo.uf || ufBusca || "",
+        competicao: alvo.competicao || compBusca || "",
+      });
+      criadas++;
+    }
+
+    commit({ clubes: [...mapa.values()] });
+    setPopBusca(false);
+    setFiltroPos(posBusca);
+    if (compBusca) setFiltroComp(compBusca);
+    setConsulta({ pos: posBusca, comp: compBusca || "" });
+    setPagina(0);
+    setErro("");
+    setAviso(
+      criadas
+        ? `${criadas} ficha(s) criada(s). Agora preencha o elenco de cada uma — ` +
+          `é o elenco que revela quem está frágil antes de qualquer notícia.`
+        : "Todos esses clubes já estavam no radar nesta posição."
+    );
+  };
+
+  /* ---- radar de notícias, direto da planilha --------------------- */
+
+  /* Competições oferecidas na busca: nacionais + as da UF escolhida. */
+  const compsDaBusca = useMemo(() => {
+    const nac = NACIONAIS.map((n) => n.nome);
+    const est = ufBusca ? ESTADUAIS[ufBusca] || [] : [];
+    return [...nac, ...est];
+  }, [ufBusca]);
+
+  /* De onde saem os clubes da busca:
+     1. da lista fixa no código, se a competição estiver lá;
+     2. senão, das fichas que já tenham essa competição/UF. */
+  const alvosDaBusca = useMemo(() => {
+    const doCodigo = compBusca ? CLUBES_POR_COMPETICAO[compBusca] : null;
+    if (doCodigo && doCodigo.length) {
+      return doCodigo.map((x) => {
+        const nome = typeof x === "string" ? x : x.nome;
+        const evitar = typeof x === "string" ? [] : x.evitar || [];
+        return { clube: nome, evitar, uf: ufBusca, competicao: compBusca };
+      });
+    }
+    return clubes.filter(
+      (c) =>
+        c.clube &&
+        (!ufBusca || (c.uf || "").toUpperCase() === ufBusca) &&
+        (!compBusca || c.competicao === compBusca)
+    );
+  }, [clubes, ufBusca, compBusca]);
+
+  const alvosVemDoCodigo = !!(
+    compBusca && CLUBES_POR_COMPETICAO[compBusca] && CLUBES_POR_COMPETICAO[compBusca].length
+  );
+
+  const buscarNoticias = async () => {
+    const alvos = alvosDaBusca.map((c) =>
+      c.evitar && c.evitar.length ? { nome: c.clube, evitar: c.evitar } : c.clube
+    );
+    if (!alvos.length) {
+      setErro("Nenhum clube nessa busca. Cadastre os participantes em CLUBES_POR_COMPETICAO, no topo do arquivo, ou preencha o campo Competição das fichas.");
+      return;
+    }
+    const pos = POSICOES.find((x) => x.id === posBusca) || POSICOES[0];
+    if (!window.PG_URL) {
+      setErro("O radar de notícias só funciona na versão publicada, ligada à planilha.");
+      return;
+    }
+
+    setBuscando(true);
+    setErro("");
+    setPopBusca(false);
+    setAviso(`Procurando notícias em ${alvos.length} clube(s)…`);
+    try {
+      const r = await fetch(window.PG_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          acao: "noticias",
+          clubes: alvos,
+          posicao: pos.termos,
+          busca: pos.busca,
+          excluir: pos.excluir || [],
+          periodo: periodoBusca,
+        }),
+      });
+
+      const cru = await r.text();
+      let j;
+      try {
+        j = JSON.parse(cru);
+      } catch (e) {
+        // Resposta que não é JSON quase sempre é página de erro do Google:
+        // implantação antiga, sem permissão, ou script com falha.
+        throw new Error(
+          "A planilha respondeu algo que não é JSON (HTTP " + r.status + "). " +
+          "Isso costuma ser implantação desatualizada ou acesso não liberado. " +
+          "Início da resposta: " + cru.slice(0, 120)
+        );
+      }
+      if (!j.ok) throw new Error("O script retornou erro: " + (j.erro || "sem detalhe"));
+
+      // A ficha é clube + posição: o mesmo clube pode estar no radar por
+      // lateral-direito e por goleiro, com elencos e notas separados.
+      const chaveFicha = (nome, pos) => normNome(nome) + "|" + (pos || "ld");
+      const mapa = new Map(
+        clubes.map((c) => [chaveFicha(c.clube, c.posicao), { ...c }])
+      );
+      let novos = 0, fichasNovas = 0;
+
+      for (const a of j.alertas || []) {
+        const k = chaveFicha(a.clube, posBusca);
+        let c = mapa.get(k);
+        if (!c) {
+          // Clube ainda sem ficha nesta posição: a notícia o traz ao radar.
+          const origem =
+            alvosDaBusca.find((x) => normNome(x.clube) === normNome(a.clube)) || {};
+          c = { ...novoClube(), clube: a.clube, posicao: posBusca,
+                uf: origem.uf || ufBusca || "",
+                competicao: origem.competicao || compBusca || "" };
+          mapa.set(k, c);
+          fichasNovas++;
+        }
+        c.sinais = c.sinais || [];
+        // Contratação na posição fecha a vaga: o sinal existe, mas empurra
+        // o clube para baixo em vez de subir.
+        const chegou = /chegada/.test(a.sinais || "");
+        const ladoIncerto = /lado_a_confirmar/.test(a.sinais || "");
+        const sig = {
+          fonte: a.fonte || "notícia",
+          quando: dataBR(a.data) || HOJE(),
+          peso: chegou ? -25 : Math.min(Number(a.pontos) || 0, 6) * 4,
+          texto:
+            (chegou ? "[vaga fechada] " : "") +
+            (ladoIncerto ? "[lado?] " : "") +
+            (a.titulo || ""),
+          link: a.link || "",
+        };
+        if (!sig.texto) continue;
+        if (c.sinais.some((x) => x.texto === sig.texto && x.fonte === sig.fonte)) continue;
+        c.sinais.push(sig);
+        novos++;
+
+        if (c.statusTitular === "desconhecido" && !chegou) {
+          if (/lesao/.test(a.sinais || "")) c.statusTitular = "lesionado";
+          else if (/rescisao/.test(a.sinais || "")) c.statusTitular = "saiu";
+          else if (/suspensao/.test(a.sinais || "")) c.statusTitular = "suspenso";
+        }
+      }
+
+      if (novos) commit({ clubes: [...mapa.values()] });
+      if (novos) setConsulta({ pos: posBusca, comp: compBusca || "" });
+      setAviso(
+        novos
+          ? `${novos} ${novos === 1 ? "alerta novo" : "alertas novos"}` +
+            (fichasNovas ? ` · ${fichasNovas} clube(s) entrou(ram) no radar` : "") +
+            " — a lista já foi reordenada"
+          : (() => {
+              const d = j.diagnostico || {};
+              const detalhe = d.brutas !== undefined
+                ? ` · o Google devolveu ${d.brutas}, sendo ${d.outroClube || 0} de outro clube, ` +
+                  `${d.outroLado || 0} do outro lado do campo, ` +
+                  `${d.semPosicao || 0} sem sinal na posição e ${d.jaVistas || 0} já mostradas antes`
+                : "";
+              return `Nada novo em ${alvos.length} clube(s)${detalhe}`;
+            })()
+      );
+    } catch (e) {
+      setErro(String((e && e.message) || e));
+      setAviso("");
+    } finally {
+      setBuscando(false);
+    }
+  };
+
+  const exportar = () => {
+    const cab = ["clube", "uf", "competicao", "janela_ate", "lds_no_elenco", "titular", "status_titular", "ultimo_contato", "resposta", "proximo_followup", "notas", "score"];
+    const linhas = ordenados.map((c) =>
+      [c.clube, c.uf, c.competicao, c.janelaAte, c.lds, c.titular, c.statusTitular, c.ultimoContato, c.resposta, c.proximo, (c.notas || "").replace(/[\n;]/g, " "), c._s].join(";")
+    );
+    const blob = new Blob([[cab.join(";"), ...linhas].join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "painel-lateral-direito.csv";
+    a.click();
+  };
+
+  const urgentes = ordenados.filter((c) => c._s >= 70).length;
+  const semElenco = ordenados.filter((c) => !c._fantasma && !elenco(c)).length;
+
+  const POR_PAGINA = 10;
+  const paginas = Math.max(1, Math.ceil(ordenados.length / POR_PAGINA));
+  const pagAtual = Math.min(pagina, paginas - 1);
+  const visiveis = ordenados.slice(pagAtual * POR_PAGINA, (pagAtual + 1) * POR_PAGINA);
+
+  return (
+    <div className="quadro">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500;600&display=swap');
+
+        .quadro { min-height:100vh; background:${C.board};
+          background-image: repeating-linear-gradient(0deg, rgba(255,255,255,.028) 0 1px, transparent 1px 46px), repeating-linear-gradient(90deg, rgba(255,255,255,.028) 0 1px, transparent 1px 46px);
+          font-family:'Barlow',system-ui,sans-serif; color:${C.giz}; padding:20px 16px 60px; }
+        .wrap { max-width:1080px; margin:0 auto; }
+
+        .eyebrow { font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:.16em; font-size:12px; color:${C.amber}; font-weight:600; }
+        .marca { font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase;
+          letter-spacing:.22em; font-size:12.5px; color:${C.amber}; }
+        .marca::after { content:""; display:block; width:34px; height:2px; background:${C.amber}; margin-top:7px; }
+        h1 { font-family:'Archivo Black',sans-serif; font-size:clamp(26px,6vw,42px); line-height:.98;
+          margin:14px 0 4px; letter-spacing:-.01em; }
+
+        .linha { height:1px; background:rgba(255,255,255,.16); margin:22px 0 18px; }
+
+        .secao { font-family:'Archivo Black',sans-serif; font-size:clamp(17px,3.4vw,23px);
+          letter-spacing:-.005em; margin:0 0 12px; padding-left:13px; position:relative; color:#fff; }
+        .secao::before { content:""; position:absolute; left:0; top:.12em; bottom:.12em;
+          width:4px; background:${C.amber}; }
+
+        .radar { display:flex; gap:10px; overflow-x:auto; padding-bottom:6px; }
+        .comp { flex:0 0 auto; min-width:186px; background:${C.boardDeep}; border:1px solid rgba(255,255,255,.12);
+          border-radius:3px; padding:11px 12px; }
+        .compTopo { display:flex; align-items:flex-start; gap:6px; }
+        .compFora { margin-left:auto; background:none; border:none; color:#93AB9E; cursor:pointer;
+          font-size:16px; line-height:1; padding:0 2px; }
+        .compFora:hover { color:${C.alerta}; }
+        .compUf { font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:.12em;
+          font-size:10px; color:${C.amber}; margin-bottom:6px; }
+        .addComp { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+        .addComp select { background:${C.boardDeep}; border:1px solid rgba(255,255,255,.16); color:${C.giz};
+          padding:9px 10px; border-radius:3px; font-family:'Barlow',sans-serif; font-size:13.5px; }
+        .comp h3 { font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; margin:0; }
+        .comp p { font-size:11.5px; line-height:1.35; color:#93AB9E; margin:7px 0 0; }
+        .comp input { width:100%; background:transparent; border:none; border-bottom:1px dashed rgba(255,255,255,.3);
+          color:${C.giz}; font-family:'Barlow',sans-serif; font-size:13px; padding:2px 0; }
+        .contagem { font-family:'Archivo Black',sans-serif; font-size:22px; line-height:1; }
+
+        .barra { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+        .busca { flex:1 1 200px; background:${C.boardDeep}; border:1px solid rgba(255,255,255,.14); color:${C.giz};
+          padding:9px 11px; border-radius:3px; font-size:14px; font-family:'Barlow',sans-serif; }
+        .btn { background:${C.amber}; color:#1B1204; border:none; padding:9px 14px; border-radius:3px; cursor:pointer;
+          font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:.08em; font-size:13.5px; }
+        .btn:disabled { opacity:.5; cursor:default; }
+        .btn.ghost { background:transparent; color:${C.giz}; border:1px solid rgba(255,255,255,.24); }
+
+        .ficha { background:${C.ficha}; color:${C.ink}; border-radius:3px; margin-bottom:9px; overflow:hidden;
+          box-shadow:0 2px 0 rgba(0,0,0,.28); border-left:5px solid var(--tom); }
+        .fichaTopo { display:flex; align-items:center; gap:12px; padding:11px 13px; cursor:pointer; }
+        .numero { font-family:'Archivo Black',sans-serif; font-size:27px; line-height:1; min-width:52px; text-align:center; color:var(--tom); }
+        .nome { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:19px; text-transform:uppercase; letter-spacing:.02em; }
+        .meta { font-size:12px; color:#5C6660; margin-top:1px; }
+        .fichaTopo.fantasma { cursor:default; opacity:.72; }
+        .btnEntrar { margin-left:auto; background:transparent; border:1px solid ${C.fichaEdge};
+          color:#5C6660; padding:5px 10px; border-radius:2px; cursor:pointer;
+          font-family:'Barlow Condensed',sans-serif; font-weight:600; text-transform:uppercase;
+          letter-spacing:.08em; font-size:11.5px; white-space:nowrap; }
+        .btnEntrar:hover { background:${C.amber}; border-color:${C.amber}; color:#1B1204; }
+        .seloVazio { margin-left:auto; font-family:'Barlow Condensed',sans-serif; font-weight:600;
+          text-transform:uppercase; letter-spacing:.08em; font-size:11px; color:#8A8A80;
+          border:1px dashed ${C.fichaEdge}; padding:2px 7px; border-radius:2px; white-space:nowrap; }
+        .seloVazio + .selo { margin-left:8px; }
+        .selo { margin-left:auto; font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase;
+          letter-spacing:.08em; font-size:11.5px; color:#fff; background:var(--tom); padding:3px 8px; border-radius:2px; white-space:nowrap; }
+
+        .detalhe { border-top:1px solid ${C.fichaEdge}; padding:13px; display:grid; gap:11px;
+          grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+        .campo label { display:block; font-family:'Barlow Condensed',sans-serif; text-transform:uppercase;
+          letter-spacing:.1em; font-size:10.5px; color:#6B7570; font-weight:600; margin-bottom:3px; }
+        .campo input, .campo select, .campo textarea { width:100%; background:#fff; border:1px solid ${C.fichaEdge};
+          border-radius:2px; padding:6px 7px; font-size:13.5px; font-family:'Barlow',sans-serif; color:${C.ink}; }
+        .campo.wide { grid-column:1/-1; }
+.ldLinha { display:flex; gap:6px; margin-bottom:5px; }
+        .ldLinha input:first-child { flex:1; }
+        .ldLinha input:nth-child(2), .ldLinha input:nth-child(3) { width:70px; }
+        .ldLinha input { background:#fff; border:1px solid ${C.fichaEdge}; border-radius:2px;
+          padding:6px 7px; font-size:13.5px; font-family:'Barlow',sans-serif; color:${C.ink}; }
+        .ldFora { background:none; border:1px solid ${C.fichaEdge}; border-radius:2px; width:30px;
+          cursor:pointer; color:${C.alerta}; font-size:15px; line-height:1; }
+        .ldMais { background:none; border:1px dashed ${C.fichaEdge}; border-radius:2px; padding:5px 10px;
+          cursor:pointer; font-family:'Barlow Condensed',sans-serif; text-transform:uppercase;
+          letter-spacing:.08em; font-size:12px; color:#5C6660; }
+        .ldLeitura { margin-top:7px; font-size:12.5px; color:#3E4A44; background:#EDE8DA;
+          border-left:2px solid ${C.calma}; padding:6px 9px; }
+        .sinais { list-style:none; margin:0; padding:0; font-size:12.5px; line-height:1.45; }
+        .sinais li { display:flex; gap:7px; align-items:flex-start; padding:4px 0 4px 9px;
+          border-left:2px solid ${C.amber}; margin-bottom:4px; color:#3E4A44; }
+        .sinalFora { flex:0 0 auto; background:none; border:1px solid ${C.fichaEdge}; border-radius:2px;
+          width:20px; height:20px; line-height:1; cursor:pointer; color:#8A8A80; font-size:13px; padding:0; }
+        .sinalFora:hover { color:#fff; background:${C.alerta}; border-color:${C.alerta}; }
+        .sinaisMais { font-size:11.5px; color:#7A857F; padding-left:9px; margin-top:2px; }
+        .sinais a { color:#1F5C7A; }
+        .apagar { background:none; border:none; color:${C.alerta}; font-size:12.5px; cursor:pointer; padding:0; text-decoration:underline; }
+
+        .paginacao { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:16px;
+          padding-top:14px; border-top:1px solid rgba(255,255,255,.14); }
+        .pagBtn { background:transparent; border:1px solid rgba(255,255,255,.24); color:${C.giz};
+          padding:7px 12px; border-radius:3px; cursor:pointer; font-family:'Barlow Condensed',sans-serif;
+          font-weight:600; text-transform:uppercase; letter-spacing:.08em; font-size:12.5px; }
+        .pagBtn:disabled { opacity:.32; cursor:default; }
+        .pagInfo { font-family:'Barlow Condensed',sans-serif; text-transform:uppercase;
+          letter-spacing:.1em; font-size:11.5px; color:#93AB9E; }
+        .pagNums { display:flex; gap:4px; margin-left:auto; }
+        .pagNum { width:30px; height:30px; border:1px solid rgba(255,255,255,.2); background:transparent;
+          color:${C.giz}; border-radius:3px; cursor:pointer; font-family:'Barlow',sans-serif; font-size:13px; }
+        .pagNum.ativo { background:${C.amber}; border-color:${C.amber}; color:#1B1204; font-weight:600; }
+        .filtros { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px; }
+        .filtros .popCampo { min-width:170px; }
+        .popBusca { background:${C.boardDeep}; border:1px solid ${C.amber}; border-radius:3px;
+          padding:14px; margin-bottom:14px; }
+        .popTitulo { font-family:'Barlow Condensed',sans-serif; font-weight:700; text-transform:uppercase;
+          letter-spacing:.14em; font-size:13px; color:${C.amber}; margin-bottom:12px; }
+        .popGrade { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+        .popCampo label { display:block; font-family:'Barlow Condensed',sans-serif; text-transform:uppercase;
+          letter-spacing:.1em; font-size:10.5px; color:#93AB9E; font-weight:600; margin-bottom:4px; }
+        .popCampo select { width:100%; background:${C.board}; border:1px solid rgba(255,255,255,.2);
+          color:${C.giz}; padding:8px 9px; border-radius:2px; font-family:'Barlow',sans-serif; font-size:13.5px; }
+        .popAlerta { margin-top:11px; font-size:12.5px; line-height:1.5; color:#F0D4A0;
+          border-left:2px solid ${C.amber}; padding-left:9px; }
+        .popNota { margin-top:11px; font-size:12.5px; line-height:1.5; color:#A9BFB2; }
+        .popNota b { color:${C.giz}; }
+        .popResumo { margin-top:11px; font-size:12.5px; line-height:1.5; color:#A9BFB2;
+          border-left:2px solid ${C.calma}; padding-left:9px; }
+        .caixaBackup { background:${C.boardDeep}; border:1px solid rgba(255,255,255,.14);
+          border-radius:3px; padding:12px; margin-bottom:14px; }
+        .vazio { border:1px dashed rgba(255,255,255,.24); border-radius:3px; padding:26px 20px; text-align:center; }
+        .vazio h3 { font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:.06em; font-size:19px; margin:0 0 6px; }
+        .vazio p { color:#A9BFB2; font-size:14px; margin:0 auto 14px; max-width:44ch; }
+
+ border:1px solid rgba(255,255,255,.12); border-radius:3px; padding:15px; }
+ }
+ margin-top:10px; }
+
+        textarea.bulk { width:100%; min-height:110px; background:${C.boardDeep}; border:1px solid rgba(255,255,255,.16);
+          color:${C.giz}; padding:10px; border-radius:3px; font-family:'Barlow',sans-serif; font-size:13.5px; }
+        :focus-visible { outline:2px solid ${C.amber}; outline-offset:2px; }
+        @media (prefers-reduced-motion: no-preference) { .ficha { transition: box-shadow .15s ease; } }
+      `}</style>
+
+      <div className="wrap">
+        <div className="marca">PG Assessoria</div>
+        <h1>PAINEL<br />INTELIGÊNCIA<br />DE MERCADO</h1>
+
+        <div className="linha" />
+
+        <h2 className="secao">Radar de janelas</h2>
+        <div className="radar">
+          {comps.map((c) => {
+            const d = dias(c.janela);
+            const tom =
+              d === null ? "#93AB9E" : d < 0 ? "#7C7C74" : d <= 14 ? C.alerta : d <= 40 ? C.amber : C.calma;
+            const fixa = c.grupo === "Nacional";
+            return (
+              <div className="comp" key={c.id}>
+                <div className="compTopo">
+                  <h3>{c.nome}</h3>
+                  {!fixa && (
+                    <button
+                      className="compFora"
+                      title="tirar do radar"
+                      onClick={() => commit({ comps: comps.filter((x) => x.id !== c.id) })}
+                    >×</button>
+                  )}
+                </div>
+                <div className="compUf">{c.grupo}</div>
+                <div className="contagem" style={{ color: tom }}>
+                  {d === null ? "—" : d < 0 ? "fechada" : `${d} d`}
+                </div>
+                <input
+                  type="date"
+                  value={c.janela}
+                  aria-label={`Data-limite de inscrição — ${c.nome}`}
+                  onChange={(e) =>
+                    commit({ comps: comps.map((x) => (x.id === c.id ? { ...x, janela: e.target.value } : x)) })
+                  }
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="addComp">
+          <select value={ufSel} onChange={(e) => { setUfSel(e.target.value); setCompSel(""); }}>
+            <option value="">Adicionar estadual — escolha a UF</option>
+            {UFS.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+
+          {ufSel && (
+            <select value={compSel} onChange={(e) => setCompSel(e.target.value)}>
+              <option value="">competição…</option>
+              {ESTADUAIS[ufSel]
+                .filter((n) => !comps.some((c) => c.nome === n && c.grupo === ufSel))
+                .map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
+
+          {compSel && (
+            <button
+              className="btn"
+              onClick={() => {
+                commit({
+                  comps: [...comps, {
+                    id: `${ufSel}-${compSel}`.replace(/\s+/g, "-").toLowerCase(),
+                    nome: compSel, grupo: ufSel, janela: "",
+                  }],
+                });
+                setCompSel("");
+              }}
+            >Colocar no radar</button>
+          )}
+
+          <button className="btn ghost" onClick={() => setOutra(!outra)}>
+            {outra ? "cancelar" : "outra competição"}
+          </button>
+        </div>
+
+        {outra && (
+          <div className="addComp">
+            <input
+              className="busca"
+              placeholder="Nome da competição que faltou"
+              value={outraNome}
+              onChange={(e) => setOutraNome(e.target.value)}
+            />
+            <button
+              className="btn"
+              onClick={() => {
+                if (!outraNome.trim()) return;
+                commit({
+                  comps: [...comps, {
+                    id: "x-" + Math.random().toString(36).slice(2, 8),
+                    nome: outraNome.trim(), grupo: ufSel || "outra", janela: "",
+                  }],
+                });
+                setOutraNome("");
+                setOutra(false);
+              }}
+            >Adicionar</button>
+          </div>
+        )}
+
+        <div className="linha" />
+
+        <h2 className="secao" style={{ marginTop: 26 }}>Clubes no radar</h2>
+
+        <div className="filtros">
+          <div className="popCampo">
+            <label>Posição</label>
+            <select
+              value={filtroPos}
+              onChange={(e) => { setFiltroPos(e.target.value); setPagina(0); setAberto(null); }}
+            >
+              <option value="">todas ({clubes.length})</option>
+              {posNoRanking.map(([id, n]) => (
+                <option key={id} value={id}>{rotuloPos(id)} ({n})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="popCampo">
+            <label>Competição</label>
+            <select
+              value={filtroComp}
+              onChange={(e) => { setFiltroComp(e.target.value); setPagina(0); setAberto(null); }}
+            >
+              <option value="">todas</option>
+              {compsNoRanking.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+          <button
+            className="btn"
+            style={{ alignSelf: "flex-end" }}
+            onClick={() => {
+              setConsulta({ pos: filtroPos, comp: filtroComp });
+              setPagina(0);
+              setAberto(null);
+            }}
+          >Pesquisar</button>
+
+          {consulta && (
+            <button
+              className="btn ghost"
+              style={{ alignSelf: "flex-end" }}
+              onClick={() => {
+                setConsulta(null);
+                setFiltroPos("");
+                setFiltroComp("");
+                setFiltro("");
+                setPagina(0);
+              }}
+            >limpar</button>
+          )}
+        </div>
+
+        <div className="barra">
+          <input className="busca" placeholder="Filtrar por clube, UF, competição…" value={filtro} onChange={(e) => { setFiltro(e.target.value); setPagina(0); }} />
+          <button className="btn" onClick={() => { const n = novoClube(); commit({ clubes: [...clubes, n] }); setAberto(n.id); }}>Adicionar clube</button>
+          <button className="btn" onClick={() => setPopBusca(!popBusca)} disabled={buscando}>
+            {buscando ? "buscando…" : "Buscar notícias"}
+          </button>
+          <button className="btn ghost" onClick={() => setColando(!colando)}>Colar lista</button>
+          <label className="btn ghost" style={{ cursor: "pointer" }}>
+            Importar CSV dos scripts
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files[0]; if (f) importarCSV(f); e.target.value = ""; }}
+            />
+          </label>
+          <button className="btn ghost" onClick={exportar}>Exportar CSV</button>
+          <button className="btn ghost" onClick={baixarBackup}>Backup</button>
+          <button
+            className="btn ghost"
+            onClick={() => { setColarBackup(!colarBackup); setBackupTexto(""); }}
+          >{colarBackup ? "cancelar" : "Restaurar"}</button>
+        </div>
+
+        {popBusca && (
+          <div className="popBusca">
+            <div className="popTitulo">Radar de notícias</div>
+
+            <div className="popGrade">
+              <div className="popCampo">
+                <label>Posição</label>
+                <select value={posBusca} onChange={(e) => setPosBusca(e.target.value)}>
+                  {POSICOES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </div>
+
+              <div className="popCampo">
+                <label>Período</label>
+                <select value={periodoBusca} onChange={(e) => setPeriodoBusca(e.target.value)}>
+                  {PERIODOS.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
+                </select>
+              </div>
+
+              <div className="popCampo">
+                <label>Estado</label>
+                <select
+                  value={ufBusca}
+                  onChange={(e) => { setUfBusca(e.target.value); setCompBusca(""); }}
+                >
+                  <option value="">todos</option>
+                  {UFS.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+
+              <div className="popCampo">
+                <label>Competição</label>
+                <select value={compBusca} onChange={(e) => setCompBusca(e.target.value)}>
+                  <option value="">todas</option>
+                  {compsDaBusca.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {["3m", "6m", "1y"].includes(periodoBusca) && (
+              <div className="popAlerta">
+                Janela longa: a primeira busca pode trazer muita coisa de uma vez,
+                e notícia antiga pesa pouco no ranking. Boa para mapear um clube novo,
+                não para o acompanhamento do dia.
+              </div>
+            )}
+
+            <div className="popNota">
+              <b>Buscar notícias</b> traz só quem teve algum acontecimento.
+              <b> Trazer os clubes</b> cria a ficha de todos — inclusive dos que
+              estão quietos, que é onde mora a antecipação.
+            </div>
+
+            <div className="popResumo">
+              {alvosDaBusca.length === 0 ? (
+                <span style={{ color: C.alerta }}>
+                  Nenhum clube nesta busca. Cadastre os participantes desta competição
+                  em <b>CLUBES_POR_COMPETICAO</b>, no topo do arquivo — ou preencha o
+                  campo <b>Competição</b> nas fichas.
+                </span>
+              ) : (
+                <>
+                  <b>{alvosDaBusca.length}</b> clube(s) ·{" "}
+                  {alvosVemDoCodigo ? "lista da competição" : "clubes já no seu radar"}
+                  <br />
+                  {alvosDaBusca.slice(0, 8).map((c) => c.clube).join(", ")}
+                  {alvosDaBusca.length > 8 ? ` e mais ${alvosDaBusca.length - 8}` : ""}
+                </>
+              )}
+            </div>
+
+            <div className="addComp">
+              <button className="btn" onClick={buscarNoticias} disabled={buscando || !alvosDaBusca.length}>
+                {buscando ? "buscando…" : "Buscar notícias"}
+              </button>
+              <button className="btn" onClick={importarCompeticao} disabled={!alvosDaBusca.length}>
+                Trazer os {alvosDaBusca.length} clubes para o radar
+              </button>
+              <button
+                className="btn ghost"
+                onClick={() => { setUfBusca(""); setCompBusca(""); }}
+              >limpar filtros</button>
+              <button className="btn ghost" onClick={() => setPopBusca(false)}>fechar</button>
+            </div>
+          </div>
+        )}
+
+        {backupTexto && (
+          <div className="caixaBackup">
+            <div className="eyebrow" style={{ marginBottom: 6 }}>
+              Seu backup — selecione tudo e copie (Ctrl+A, Ctrl+C dentro da caixa)
+            </div>
+            <textarea
+              className="bulk"
+              readOnly
+              value={backupTexto}
+              onFocus={(e) => e.target.select()}
+              style={{ minHeight: 90, fontFamily: "monospace", fontSize: 11.5 }}
+            />
+            <div className="addComp">
+              <button
+                className="btn"
+                onClick={() => {
+                  navigator.clipboard
+                    ? navigator.clipboard.writeText(backupTexto).then(
+                        () => setAviso("Backup copiado"),
+                        () => setAviso("Copie manualmente: clique na caixa e use Ctrl+C")
+                      )
+                    : setAviso("Copie manualmente: clique na caixa e use Ctrl+C");
+                }}
+              >Copiar</button>
+              <button className="btn ghost" onClick={() => setBackupTexto("")}>fechar</button>
+            </div>
+          </div>
+        )}
+
+        {colarBackup && (
+          <div className="caixaBackup">
+            <div className="eyebrow" style={{ marginBottom: 6 }}>
+              Cole aqui o backup e restaure
+            </div>
+            <textarea
+              className="bulk"
+              placeholder='Cole o texto do backup, começando com {"versao":1...'
+              value={textoColado}
+              onChange={(e) => setTextoColado(e.target.value)}
+              style={{ minHeight: 90, fontFamily: "monospace", fontSize: 11.5 }}
+            />
+            <div className="addComp">
+              <button
+                className="btn"
+                onClick={() => textoColado.trim() && restaurarBackup(textoColado.trim())}
+              >Restaurar</button>
+              <label className="btn ghost" style={{ cursor: "pointer" }}>
+                ou escolher arquivo
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  style={{ display: "none" }}
+                  onChange={(e) => { const f = e.target.files[0]; if (f) restaurarBackup(f); e.target.value = ""; }}
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {colando && (
+          <div style={{ marginBottom: 14 }}>
+            <textarea
+              className="bulk"
+              placeholder={"Um clube por linha. Opcional: clube; UF; competição\n\nCarlos Renaux; SC; Copa Santa Catarina\nInter de Limeira; SP; Copa Paulista"}
+              value={bulk}
+              onChange={(e) => setBulk(e.target.value)}
+            />
+            <button className="btn" style={{ marginTop: 8 }} onClick={importar}>Criar fichas</button>
+          </div>
+        )}
+
+        {aviso && (
+          <div className="eyebrow" style={{ color: C.calma, marginBottom: 8 }}>{aviso}</div>
+        )}
+
+        {urgentes > 0 && (
+          <div className="eyebrow" style={{ color: C.alerta, marginBottom: 10 }}>
+            {urgentes} {urgentes === 1 ? "clube pede ligação hoje" : "clubes pedem ligação hoje"}
+          </div>
+        )}
+
+        {semElenco > 0 && (
+          <div className="eyebrow" style={{ color: C.amber, marginBottom: 10 }}>
+            {semElenco} ficha(s) sem elenco mapeado — até preencher, o painel não
+            enxerga fragilidade nelas
+          </div>
+        )}
+
+        {carregando ? (
+          <p style={{ color: "#A9BFB2" }}>Abrindo o quadro…</p>
+        ) : !consulta ? (
+          <div className="vazio">
+            <h3>Escolha o que quer ver</h3>
+            <p>
+              Selecione a posição e a competição acima e clique em <b>Pesquisar</b>.
+              Deixando as duas em “todas”, você vê o radar inteiro.
+            </p>
+            <button
+              className="btn"
+              onClick={() => { setConsulta({ pos: "", comp: "" }); setPagina(0); }}
+            >Ver tudo</button>
+          </div>
+        ) : ordenados.length === 0 ? (
+          <div className="vazio">
+            <h3>Nenhum clube nesta consulta</h3>
+            <p>
+              Nada corresponde a esses filtros. Tente outra competição, ou use o
+              radar de notícias para trazer clubes que se movimentaram.
+            </p>
+            <button className="btn" onClick={() => { const n = novoClube(); commit({ clubes: [...clubes, n] }); setAberto(n.id); }}>Abrir a primeira ficha</button>
+          </div>
+        ) : (
+          visiveis.map((c) => {
+            const f = faixa(c._s);
+            const d = dias(c.janelaAte);
+            return (
+              <div className="ficha" key={c.id} style={{ "--tom": f.cor }}>
+                <div
+                  className={"fichaTopo" + (c._fantasma ? " fantasma" : "")}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => !c._fantasma && setAberto(aberto === c.id ? null : c.id)}
+                  onKeyDown={(e) =>
+                    !c._fantasma &&
+                    (e.key === "Enter" || e.key === " ") &&
+                    setAberto(aberto === c.id ? null : c.id)
+                  }
+                >
+                  <div className="numero">{c._s}</div>
+                  <div>
+                    <div className="nome">{c.clube || "clube sem nome"}</div>
+                    <div className="meta">
+                      {[rotuloPos(c.posicao || "ld"), c.uf, c.competicao].filter(Boolean).join(" · ")}
+                      {c._fantasma ? " · fora do radar" : ""}
+                      {d !== null && (d < 0 ? " · janela fechada" : ` · fecha em ${d} d`)}
+                      {(() => {
+                        if (c._fantasma) return "";
+                        const e = elenco(c);
+                        if (!e) return "";
+                        return e.vazio
+                          ? " · nenhum atleta na posição"
+                          : ` · ${e.lds.length} no elenco · ${e.perfil}`;
+                      })()}
+                    </div>
+                  </div>
+                  {c._fantasma ? (
+                    <button
+                      className="btnEntrar"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        const nova = {
+                          ...novoClube(),
+                          clube: c.clube,
+                          competicao: c.competicao,
+                          posicao: c.posicao,
+                        };
+                        commit({ clubes: [...clubes, nova] });
+                        setAberto(nova.id);
+                      }}
+                    >trazer para o radar</button>
+                  ) : (
+                    <>
+                      {!elenco(c) && <span className="seloVazio">sem elenco</span>}
+                      <span className="selo">{f.label}</span>
+                    </>
+                  )}
+                </div>
+
+                {aberto === c.id && !c._fantasma && (
+                  <div className="detalhe">
+                    <div className="campo"><label>Clube</label>
+                      <input value={c.clube} onChange={(e) => editar(c.id, "clube", e.target.value)} /></div>
+                    <div className="campo"><label>UF</label>
+                      <input value={c.uf} onChange={(e) => editar(c.id, "uf", e.target.value)} /></div>
+                    <div className="campo"><label>Posição monitorada</label>
+                      <select value={c.posicao || "ld"} onChange={(e) => editar(c.id, "posicao", e.target.value)}>
+                        {POSICOES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select></div>
+                    <div className="campo"><label>Competição</label>
+                      <input value={c.competicao} onChange={(e) => editar(c.id, "competicao", e.target.value)} /></div>
+                    <div className="campo"><label>Janela fecha em</label>
+                      <input type="date" value={c.janelaAte} onChange={(e) => editar(c.id, "janelaAte", e.target.value)} /></div>
+                    <div className="campo">
+                      <label>Quantos há na posição (0 = confirmado vazio)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="deixe em branco se não sabe"
+                        value={c.lds}
+                        onChange={(e) => editar(c.id, "lds", e.target.value)}
+                      /></div>
+                    <div className="campo"><label>Titular da posição</label>
+                      <input value={c.titular} onChange={(e) => editar(c.id, "titular", e.target.value)} /></div>
+                    <div className="campo"><label>Situação do titular</label>
+                      <select value={c.statusTitular} onChange={(e) => editar(c.id, "statusTitular", e.target.value)}>
+                        {STATUS_TITULAR.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
+                      </select></div>
+                    <div className="campo"><label>Último contato</label>
+                      <input type="date" value={c.ultimoContato} onChange={(e) => editar(c.id, "ultimoContato", e.target.value)} /></div>
+                    <div className="campo"><label>Resposta que deram</label>
+                      <select value={c.resposta} onChange={(e) => editar(c.id, "resposta", e.target.value)}>
+                        {RESPOSTAS.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}
+                      </select></div>
+                    <div className="campo"><label>Voltar a falar em</label>
+                      <input type="date" value={c.proximo} onChange={(e) => editar(c.id, "proximo", e.target.value)} /></div>
+                    <div className="campo wide">
+                      <label>
+                        {rotuloPos(c.posicao || "ld")}s do elenco — nome, minutos e jogos
+                      </label>
+                      {(c.laterais || []).map((ld, i) => (
+                        <div className="ldLinha" key={i}>
+                          <input
+                            placeholder="nome"
+                            value={ld.nome}
+                            onChange={(ev) => {
+                              const L = [...c.laterais];
+                              L[i] = { ...L[i], nome: ev.target.value };
+                              editar(c.id, "laterais", L);
+                            }}
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="min"
+                            title="minutos na temporada"
+                            value={ld.min}
+                            onChange={(ev) => {
+                              const L = [...c.laterais];
+                              L[i] = { ...L[i], min: ev.target.value };
+                              editar(c.id, "laterais", L);
+                            }}
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="jogos"
+                            title="jogos disputados"
+                            value={ld.jogos || ""}
+                            onChange={(ev) => {
+                              const L = [...c.laterais];
+                              L[i] = { ...L[i], jogos: ev.target.value };
+                              editar(c.id, "laterais", L);
+                            }}
+                          />
+                          <button
+                            className="ldFora"
+                            title="remover"
+                            onClick={() => editar(c.id, "laterais", c.laterais.filter((_, j) => j !== i))}
+                          >×</button>
+                        </div>
+                      ))}
+                      <button
+                        className="ldMais"
+                        onClick={() => editar(c.id, "laterais", [...(c.laterais || []), { nome: "", min: "", jogos: "" }])}
+                      >+ atleta</button>
+                      {(() => {
+                        const e = elenco(c);
+                        if (!e) return null;
+                        return (
+                          <div className="ldLeitura">
+                            {e.vazio ? (
+                              <b>Nenhum atleta na posição — vaga estruturalmente aberta</b>
+                            ) : (
+                              <>
+                                <b>{e.perfil}</b> · {e.lds.length} no elenco ·{" "}
+                                {Math.round(e.conc * 100)}% dos minutos no primeiro
+                                {e.uso ? ` · ${e.uso}` : ""}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {(c.sinais || []).length > 0 && (
+                      <div className="campo wide">
+                        <label>Sinais captados pelos scripts</label>
+                        <ul className="sinais">
+                          {[...c.sinais]
+                            .sort((a, b) => (b.quando || "").localeCompare(a.quando || ""))
+                            .slice(0, 8)
+                            .map((s2) => (
+                              <li key={(s2.fonte || "") + "|" + (s2.texto || "")}>
+                                <button
+                                  className="sinalFora"
+                                  title="descartar este sinal"
+                                  aria-label="descartar este sinal"
+                                  onClick={() =>
+                                    editar(
+                                      c.id,
+                                      "sinais",
+                                      c.sinais.filter(
+                                        (x) => !(x.texto === s2.texto && x.fonte === s2.fonte)
+                                      )
+                                    )
+                                  }
+                                >×</button>
+                                <span>
+                                  <b>{s2.fonte}</b>
+                                  {s2.quem ? ` · ${s2.quem}` : ""}
+                                  {s2.quando ? ` · ${s2.quando.split("-").reverse().join("/")}` : ""} —{" "}
+                                  {s2.link ? (
+                                    <a href={s2.link} target="_blank" rel="noreferrer">{s2.texto}</a>
+                                  ) : (
+                                    s2.texto
+                                  )}
+                                </span>
+                              </li>
+                            ))}
+                        </ul>
+                        {c.sinais.length > 8 && (
+                          <div className="sinaisMais">
+                            e mais {c.sinais.length - 8} sinal(is) mais antigo(s)
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="campo wide"><label>Notas — quem decide, telefone, o que foi dito</label>
+                      <textarea rows="2" value={c.notas} onChange={(e) => editar(c.id, "notas", e.target.value)} /></div>
+                    <div className="campo wide">
+                      <button className="apagar" onClick={() => commit({ clubes: clubes.filter((x) => x.id !== c.id) })}>
+                        Apagar esta ficha
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+
+        {paginas > 1 && (
+          <div className="paginacao">
+            <button
+              className="pagBtn"
+              onClick={() => { setPagina(pagAtual - 1); setAberto(null); }}
+              disabled={pagAtual === 0}
+            >← anteriores</button>
+
+            <span className="pagInfo">
+              {pagAtual * POR_PAGINA + 1}–{Math.min((pagAtual + 1) * POR_PAGINA, ordenados.length)}
+              {" de "}{ordenados.length}
+            </span>
+
+            <div className="pagNums">
+              {Array.from({ length: paginas }, (_, i) => (
+                <button
+                  key={i}
+                  className={"pagNum" + (i === pagAtual ? " ativo" : "")}
+                  onClick={() => { setPagina(i); setAberto(null); }}
+                  aria-current={i === pagAtual ? "page" : undefined}
+                >{i + 1}</button>
+              ))}
+            </div>
+
+            <button
+              className="pagBtn"
+              onClick={() => { setPagina(pagAtual + 1); setAberto(null); }}
+              disabled={pagAtual >= paginas - 1}
+            >seguintes →</button>
+          </div>
+        )}
+
+        {erro && <p style={{ color: C.alerta, marginTop: 14, fontSize: 13.5 }}>{erro}</p>}
+      </div>
+    </div>
+  );
+}
+
+const raiz = ReactDOM.createRoot(document.getElementById("raiz"));
+raiz.render(<Painel />);
+</script>
+</body>
+</html>
