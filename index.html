@@ -243,10 +243,10 @@ const CLUBES_POR_COMPETICAO = {
     "ASA", "Ferroviário", "Manaus", "Altos",
   ],
   "Copa Paulista": [
-    "Comercial", "Francana", "Botafogo-SP", "Inter de Limeira",
-    "União São João", "XV de Jaú", "Grêmio Prudente", "Linense",
-    "Marília", "Monte Azul", "Noroeste", "Primavera",
-    "Rio Branco-SP", "Santo André", "São Bento", "São José",
+    "Bandeirante", "Comercial", "EC São Bernardo", "Grêmio Prudente",
+    "Juventus-SP", "Linense", "Marília", "Noroeste", "Osasco Sporting",
+    "Paulista", "Primavera", "Santo André", "São Caetano", "São José",
+    "União São João", "XV de Piracicaba",
   ],
   "Copa Santa Catarina": [
     { nome: "Barra", evitar: ["barra da tijuca", "barra funda",
@@ -270,7 +270,6 @@ const CLUBES_POR_COMPETICAO = {
     "América de Propriá", "Atlético Gloriense", "Desportiva Aracaju",
     "Falcon", "Guarany", "Lagarto",
   ],
-"Série C": ["ABC", "Anápolis", "Botafogo-PB", "Brusque", "Caxias", "Confiança", "CSA", "Figueirense", "Floresta", "Guarani", "Itabaiana", "Ituano", "Londrina", "Maringá", "Náutico", "Ponte Preta", "Retrô", "Tombense", "Ypiranga-RS", "São Bernardo"],
 };
 
 /* Janelas de tempo aceitas pelo Google Notícias. */
@@ -366,12 +365,25 @@ const RESPOSTAS = [
 /* -------- leitura do elenco de laterais-direitos ------------------ */
 /* Recebe [{nome, min}] e devolve o retrato da posição no clube.      */
 function elenco(c) {
+  // Quando o atleta traz a quebra por competição e a ficha tem uma
+  // competição definida, valem os números DAQUELA competição. Um lateral
+  // com 1.700 minutos no Paulista A4 e 270 na Copa Paulista é titular
+  // absoluto num lugar e coadjuvante no outro.
+  const daComp = (x) => {
+    const mapa = x.porComp || null;
+    if (mapa && c.competicao && mapa[c.competicao]) return mapa[c.competicao];
+    return { min: x.min, jogos: x.jogos };
+  };
+
   const lds = (c.laterais || [])
-    .map((x) => ({
-      nome: (x.nome || "").trim(),
-      min: Number(x.min) || 0,
-      jogos: Number(x.jogos) || 0,
-    }))
+    .map((x) => {
+      const n = daComp(x);
+      return {
+        nome: (x.nome || "").trim(),
+        min: Number(n.min) || 0,
+        jogos: Number(n.jogos) || 0,
+      };
+    })
     .filter((x) => x.nome)
     .map((x) => ({ ...x, media: x.jogos ? Math.round(x.min / x.jogos) : null }))
     .sort((a, b) => b.min - a.min);
@@ -736,6 +748,12 @@ function Painel() {
 
     const cols = Object.keys(linhas[0]);
     const tem = (...n) => n.some((x) => cols.includes(x));
+    // Planilha de elenco: uma linha por atleta, com posição e minutagem.
+    if (tem("_clube") && tem("_posicao")) {
+      importarElenco(linhas);
+      return;
+    }
+
     const eBid = tem("situacao", "tipo_bid", "atleta", "leitura");
     const eNoticia = tem("sinais", "titulo", "pontos");
     if (!eBid && !eNoticia) {
@@ -981,6 +999,113 @@ function Painel() {
     );
   };
 
+  /* ---- planilha de elenco por posição ---------------------------- */
+
+  /** "Paulista A4:19/1700 | Copa Paulista:3/270" -> mapa por competição. */
+  const lerPorCompeticao = (texto) => {
+    const mapa = {};
+    for (const parte of String(texto || "").split("|")) {
+      const corte = parte.lastIndexOf(":");
+      if (corte < 0) continue;
+      const nome = parte.slice(0, corte).trim();
+      const [j, m] = parte.slice(corte + 1).trim().split("/");
+      if (!nome) continue;
+      mapa[nome] = { jogos: Number(j) || 0, min: Number(m) || 0 };
+    }
+    return mapa;
+  };
+
+  /** "Lateral Direito" -> "ld". Cai em lateral-direito se não reconhecer. */
+  const posicaoParaId = (texto) => {
+    const t = nomeSimples(texto);
+    if (t.includes("lateral") && t.includes("esquerd")) return "le";
+    if (t.includes("lateral") && t.includes("direit")) return "ld";
+    if (t.includes("zagueiro") || t.includes("zaga")) return "zag";
+    if (t.includes("volante")) return "vol";
+    if (t.includes("meia") || t.includes("meio")) return "mei";
+    if (t.includes("atacante") || t.includes("centroavante") || t.includes("ponta"))
+      return "ata";
+    if (t.includes("goleiro")) return "gol";
+    return "ld";
+  };
+
+  const importarElenco = (linhas) => {
+    // A competição da planilha é a que aparece em quase todos os atletas.
+    const contagem = new Map();
+    for (const l of linhas) {
+      for (const nome of Object.keys(lerPorCompeticao(l._por_competicao))) {
+        contagem.set(nome, (contagem.get(nome) || 0) + 1);
+      }
+    }
+    const daPlanilha =
+      [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+
+    const chaveFicha = (nome, pos) => normNome(nome) + "|" + pos;
+    const mapa = new Map(clubes.map((c) => [chaveFicha(c.clube, c.posicao), { ...c }]));
+    const tocadas = new Set();
+    let criadas = 0, atletas = 0;
+
+    for (const l of linhas) {
+      const clube = (l._clube || "").trim();
+      const nome = (l._nome || "").trim();
+      if (!clube || !nome) continue;
+
+      const pos = posicaoParaId(l._posicao);
+      const k = chaveFicha(clube, pos);
+
+      let c = mapa.get(k);
+      if (!c) {
+        c = { ...novoClube(), clube, posicao: pos, competicao: daPlanilha };
+        mapa.set(k, c);
+        criadas++;
+      }
+      if (!c.competicao) c.competicao = daPlanilha;
+
+      // Primeira linha deste clube nesta importação: elenco recomeça,
+      // para a planilha nova não somar em cima da antiga.
+      if (!tocadas.has(k)) {
+        c.laterais = [];
+        c.lds = "";
+        tocadas.add(k);
+      }
+
+      c.laterais.push({
+        nome,
+        min: Number(l._minutos) || 0,
+        jogos: Number(l._jogos) || 0,
+        porComp: lerPorCompeticao(l._por_competicao),
+      });
+      atletas++;
+    }
+
+    // Clube que está no radar nesta competição e NÃO apareceu na planilha
+    // não tem ninguém na posição — é zero confirmado, não "não mapeei".
+    let zerados = 0;
+    for (const [k, c] of mapa.entries()) {
+      if (tocadas.has(k)) continue;
+      if (!daPlanilha || c.competicao !== daPlanilha) continue;
+      if ((c.laterais || []).length) continue;
+      const posDaPlanilha = [...tocadas].some((x) => x.endsWith("|" + c.posicao));
+      if (!posDaPlanilha) continue;
+      c.lds = "0";
+      zerados++;
+    }
+
+    commit({ clubes: [...mapa.values()] });
+    if (daPlanilha) setFiltroComp(daPlanilha);
+    const posPrincipal = linhas.length ? posicaoParaId(linhas[0]._posicao) : "";
+    if (posPrincipal) setFiltroPos(posPrincipal);
+    setConsulta({ pos: posPrincipal, comp: daPlanilha });
+    setPagina(0);
+    setErro("");
+    setAviso(
+      `${atletas} atleta(s) em ${tocadas.size} ficha(s)` +
+        (criadas ? ` · ${criadas} nova(s)` : "") +
+        (zerados ? ` · ${zerados} clube(s) sem ninguém na posição` : "") +
+        (daPlanilha ? ` · competição: ${daPlanilha}` : "")
+    );
+  };
+
   /* ---- trazer uma competição inteira para o radar ---------------- */
 
   const importarCompeticao = () => {
@@ -1168,6 +1293,7 @@ function Painel() {
               if (d.httpRuim) partes.push(`${d.httpRuim} recusadas pelo Google (HTTP ${d.ultimoHttp})`);
               if (d.semResposta) partes.push(`${d.semResposta} sem resposta`);
               if (d.falhas) partes.push(`${d.falhas} falha(s) de rede`);
+              if (d.vazias) partes.push(`${d.vazias} clube(s) sem resposta do Google`);
               return `Nada novo em ${alvos.length} clube(s)` +
                 (partes.length ? ` · ${partes.join(", ")}` : "");
             })()
