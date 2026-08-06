@@ -336,6 +336,13 @@ const novoAtleta = () => ({
   notas: "",
 });
 
+/* A ficha é clube + posição + categoria. O mesmo clube pode estar no
+   radar por lateral-direito profissional e por goleiro sub-20, com
+   elencos, notas e pontuações separados. Fichas antigas, sem categoria,
+   contam como profissional. */
+const chaveFicha = (nome, pos, cat) =>
+  normNome(nome) + "|" + (pos || "ld") + "|" + (cat || "pro");
+
 const rotuloCat = (id) =>
   (CATEGORIAS.find((c) => c.id === id) || {}).label || "";
 
@@ -598,6 +605,7 @@ const novoClube = () => ({
   proximo: "",
   notas: "",
   posicao: "ld",
+  categoria: "pro",
   sinais: [],
   laterais: [],
 });
@@ -616,6 +624,7 @@ function Painel() {
   const [aberto, setAberto] = useState(null);
   const [pagina, setPagina] = useState(0);
   const [filtroPos, setFiltroPos] = useState("");
+  const [filtroCat, setFiltroCat] = useState("");
   const [filtroComp, setFiltroComp] = useState("");
   const [consulta, setConsulta] = useState(null);
   const [verAtletas, setVerAtletas] = useState(false);
@@ -625,6 +634,7 @@ function Painel() {
   const [buscando, setBuscando] = useState(false);
   const [popBusca, setPopBusca] = useState(false);
   const [posBusca, setPosBusca] = useState("ld");
+  const [catBusca, setCatBusca] = useState("pro");
   const [ufBusca, setUfBusca] = useState("");
   const [compBusca, setCompBusca] = useState("");
   const [periodoBusca, setPeriodoBusca] = useState("7d");
@@ -693,11 +703,12 @@ function Painel() {
     const f = filtro.trim().toLowerCase();
 
     if (!consulta) return [];
-    const { pos: qPos, comp: qComp } = consulta;
+    const { pos: qPos, comp: qComp, cat: qCat } = consulta;
 
     const reais = clubes
       .map((c) => ({ ...c, _s: score(c) }))
       .filter((c) => !qPos || (c.posicao || "ld") === qPos)
+      .filter((c) => !qCat || (c.categoria || "pro") === qCat)
       .filter((c) => !qComp || c.competicao === qComp);
 
     // Com uma competição filtrada, os participantes que ainda não têm ficha
@@ -714,6 +725,7 @@ function Painel() {
           uf: "",
           competicao: qComp,
           posicao: qPos || "ld",
+          categoria: qCat || "pro",
           sinais: [],
           laterais: [],
           notas: "",
@@ -1066,7 +1078,11 @@ function Painel() {
 
   /** Quais atletas seus se encaixam numa ficha de clube. */
   const atletasPara = (ficha) =>
-    atletas.filter((a) => (a.posicao || "ld") === (ficha.posicao || "ld"));
+    atletas.filter(
+      (a) =>
+        (a.posicao || "ld") === (ficha.posicao || "ld") &&
+        (a.categoria || "pro") === (ficha.categoria || "pro")
+    );
 
   /* ---- planilha de elenco por posição ---------------------------- */
 
@@ -1099,6 +1115,10 @@ function Painel() {
   };
 
   const importarElenco = (linhas) => {
+    // A planilha não traz categoria; vale a que estiver selecionada no
+    // radar de notícias. Profissional é o padrão.
+    const catImport = catBusca || "pro";
+
     // A competição da planilha é a que aparece em quase todos os atletas.
     const contagem = new Map();
     for (const l of linhas) {
@@ -1109,8 +1129,9 @@ function Painel() {
     const daPlanilha =
       [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
 
-    const chaveFicha = (nome, pos) => normNome(nome) + "|" + pos;
-    const mapa = new Map(clubes.map((c) => [chaveFicha(c.clube, c.posicao), { ...c }]));
+    const mapa = new Map(
+      clubes.map((c) => [chaveFicha(c.clube, c.posicao, c.categoria), { ...c }])
+    );
     const tocadas = new Set();
     let criadas = 0, atletas = 0;
 
@@ -1120,11 +1141,12 @@ function Painel() {
       if (!clube || !nome) continue;
 
       const pos = posicaoParaId(l._posicao);
-      const k = chaveFicha(clube, pos);
+      const k = chaveFicha(clube, pos, catImport);
 
       let c = mapa.get(k);
       if (!c) {
-        c = { ...novoClube(), clube, posicao: pos, competicao: daPlanilha };
+        c = { ...novoClube(), clube, posicao: pos, categoria: catImport,
+              competicao: daPlanilha };
         mapa.set(k, c);
         criadas++;
       }
@@ -1178,12 +1200,13 @@ function Painel() {
     for (const item of participantes) {
       const nomeClube = typeof item === "string" ? item : item.nome;
       for (const pos of posicoesDaPlanilha) {
-        const k = chaveFicha(nomeClube, pos);
+        const k = chaveFicha(nomeClube, pos, catImport);
         if (mapa.has(k)) continue;
         const c = {
           ...novoClube(),
           clube: nomeClube,
           posicao: pos,
+          categoria: catImport,
           competicao: daPlanilha,
         };
         marcarZero(c);
@@ -1196,7 +1219,8 @@ function Painel() {
     if (daPlanilha) setFiltroComp(daPlanilha);
     const posPrincipal = linhas.length ? posicaoParaId(linhas[0]._posicao) : "";
     if (posPrincipal) setFiltroPos(posPrincipal);
-    setConsulta({ pos: posPrincipal, comp: daPlanilha });
+    setFiltroCat(catImport);
+    setConsulta({ pos: posPrincipal, comp: daPlanilha, cat: catImport });
     setPagina(0);
     setErro("");
     setAviso(
@@ -1217,17 +1241,19 @@ function Painel() {
       return;
     }
 
-    const chaveFicha = (nome, pos) => normNome(nome) + "|" + (pos || "ld");
-    const mapa = new Map(clubes.map((c) => [chaveFicha(c.clube, c.posicao), { ...c }]));
+    const mapa = new Map(
+      clubes.map((c) => [chaveFicha(c.clube, c.posicao, c.categoria), { ...c }])
+    );
     let criadas = 0;
 
     for (const alvo of alvosDaBusca) {
-      const k = chaveFicha(alvo.clube, posBusca);
+      const k = chaveFicha(alvo.clube, posBusca, catBusca);
       if (mapa.has(k)) continue;
       mapa.set(k, {
         ...novoClube(),
         clube: alvo.clube,
         posicao: posBusca,
+        categoria: catBusca,
         uf: alvo.uf || ufBusca || "",
         competicao: alvo.competicao || compBusca || "",
       });
@@ -1238,7 +1264,7 @@ function Painel() {
     setPopBusca(false);
     setFiltroPos(posBusca);
     if (compBusca) setFiltroComp(compBusca);
-    setConsulta({ pos: posBusca, comp: compBusca || "" });
+    setConsulta({ pos: posBusca, comp: compBusca || "", cat: catBusca });
     setPagina(0);
     setErro("");
     setAviso(
@@ -1332,20 +1358,20 @@ function Painel() {
 
       // A ficha é clube + posição: o mesmo clube pode estar no radar por
       // lateral-direito e por goleiro, com elencos e notas separados.
-      const chaveFicha = (nome, pos) => normNome(nome) + "|" + (pos || "ld");
       const mapa = new Map(
-        clubes.map((c) => [chaveFicha(c.clube, c.posicao), { ...c }])
+        clubes.map((c) => [chaveFicha(c.clube, c.posicao, c.categoria), { ...c }])
       );
       let novos = 0, fichasNovas = 0;
 
       for (const a of j.alertas || []) {
-        const k = chaveFicha(a.clube, posBusca);
+        const k = chaveFicha(a.clube, posBusca, catBusca);
         let c = mapa.get(k);
         if (!c) {
           // Clube ainda sem ficha nesta posição: a notícia o traz ao radar.
           const origem =
             alvosDaBusca.find((x) => normNome(x.clube) === normNome(a.clube)) || {};
           c = { ...novoClube(), clube: a.clube, posicao: posBusca,
+                categoria: catBusca,
                 uf: origem.uf || ufBusca || "",
                 competicao: origem.competicao || compBusca || "" };
           mapa.set(k, c);
@@ -1379,7 +1405,7 @@ function Painel() {
       }
 
       if (novos) commit({ clubes: [...mapa.values()] });
-      if (novos) setConsulta({ pos: posBusca, comp: compBusca || "" });
+      if (novos) setConsulta({ pos: posBusca, comp: compBusca || "", cat: catBusca });
       setAviso(
         novos
           ? `${novos} ${novos === 1 ? "alerta novo" : "alertas novos"}` +
@@ -1809,7 +1835,8 @@ function Painel() {
                 const a = atletas.find((x) => x.id === id);
                 if (a) {
                   setFiltroPos(a.posicao || "ld");
-                  setConsulta({ pos: a.posicao || "ld", comp: filtroComp });
+                  setFiltroCat(a.categoria || "pro");
+                  setConsulta({ pos: a.posicao || "ld", comp: filtroComp, cat: a.categoria || "pro" });
                   setPagina(0);
                 }
               }}
@@ -1847,6 +1874,19 @@ function Painel() {
           </div>
 
           <div className="popCampo">
+            <label>Categoria</label>
+            <select
+              value={filtroCat}
+              onChange={(e) => { setFiltroCat(e.target.value); setPagina(0); setAberto(null); }}
+            >
+              <option value="">todas</option>
+              {CATEGORIAS.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="popCampo">
             <label>Competição</label>
             <select
               value={filtroComp}
@@ -1861,7 +1901,7 @@ function Painel() {
             className="btn"
             style={{ alignSelf: "flex-end" }}
             onClick={() => {
-              setConsulta({ pos: filtroPos, comp: filtroComp });
+              setConsulta({ pos: filtroPos, comp: filtroComp, cat: filtroCat });
               setPagina(0);
               setAberto(null);
             }}
@@ -1875,6 +1915,7 @@ function Painel() {
                 setConsulta(null);
                 setFiltroPos("");
                 setFiltroComp("");
+                setFiltroCat("");
                 setFiltro("");
                 setPagina(0);
               }}
@@ -1915,6 +1956,15 @@ function Painel() {
                 <label>Posição</label>
                 <select value={posBusca} onChange={(e) => setPosBusca(e.target.value)}>
                   {POSICOES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </div>
+
+              <div className="popCampo">
+                <label>Categoria</label>
+                <select value={catBusca} onChange={(e) => setCatBusca(e.target.value)}>
+                  {CATEGORIAS.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
+                  ))}
                 </select>
               </div>
 
@@ -2092,7 +2142,7 @@ function Painel() {
             </p>
             <button
               className="btn"
-              onClick={() => { setConsulta({ pos: "", comp: "" }); setPagina(0); }}
+              onClick={() => { setConsulta({ pos: "", comp: "", cat: "" }); setPagina(0); }}
             >Ver tudo</button>
           </div>
         ) : ordenados.length === 0 ? (
@@ -2125,7 +2175,12 @@ function Painel() {
                   <div>
                     <div className="nome">{c.clube || "clube sem nome"}</div>
                     <div className="meta">
-                      {[rotuloPos(c.posicao || "ld"), c.uf, c.competicao].filter(Boolean).join(" · ")}
+                      {[
+                        rotuloPos(c.posicao || "ld"),
+                        rotuloCat(c.categoria || "pro"),
+                        c.uf,
+                        c.competicao,
+                      ].filter(Boolean).join(" · ")}
                       {c._fantasma ? " · fora do radar" : ""}
                       {d !== null && (d < 0 ? " · janela fechada" : ` · fecha em ${d} d`)}
                       {(() => {
@@ -2170,6 +2225,15 @@ function Painel() {
                     <div className="campo"><label>Posição monitorada</label>
                       <select value={c.posicao || "ld"} onChange={(e) => editar(c.id, "posicao", e.target.value)}>
                         {POSICOES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select></div>
+                    <div className="campo"><label>Categoria</label>
+                      <select
+                        value={c.categoria || "pro"}
+                        onChange={(e) => editar(c.id, "categoria", e.target.value)}
+                      >
+                        {CATEGORIAS.map((x) => (
+                          <option key={x.id} value={x.id}>{x.label}</option>
+                        ))}
                       </select></div>
                     <div className="campo"><label>Competição</label>
                       <input value={c.competicao} onChange={(e) => editar(c.id, "competicao", e.target.value)} /></div>
