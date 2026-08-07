@@ -1123,7 +1123,9 @@ function Painel() {
 
   /* ---- elenco puxado da sua API do ogol -------------------------- */
 
-  const edicaoAtual = EDICOES_OGOL[compBusca] || "";
+  /* A extração usa os filtros do ranking — posição e competição são
+     escolhidas ali, não dentro do pop-up de notícias. */
+  const edicaoAtual = EDICOES_OGOL[filtroComp] || "";
 
   /**
    * Dispara a extração na API local e acompanha até terminar.
@@ -1138,15 +1140,20 @@ function Painel() {
     }
     if (!edicaoAtual) {
       setErro(
-        `Não tenho o ID de edição da competição "${compBusca}". ` +
-          "Adicione em EDICOES_OGOL, no topo do arquivo."
+        filtroComp
+          ? `Não tenho o ID de edição de "${filtroComp}". Adicione em EDICOES_OGOL, no topo do arquivo.`
+          : "Escolha uma competição no filtro acima antes de extrair."
       );
       return;
     }
 
-    const posApi = POSICAO_NA_API[posBusca];
+    const posApi = POSICAO_NA_API[filtroPos];
     if (!posApi) {
-      setErro("Essa posição não existe na API.");
+      setErro(
+        filtroPos
+          ? "Essa posição não existe na API."
+          : "Escolha uma posição no filtro acima antes de extrair."
+      );
       return;
     }
 
@@ -1162,7 +1169,7 @@ function Painel() {
         body: JSON.stringify({
           edicao: edicaoAtual,
           posicao: posApi,
-          rotulo: compBusca,
+          rotulo: filtroComp,
           detalhar: true,
           so_ativos: true,
           cache_dias: 7,
@@ -1245,7 +1252,7 @@ function Painel() {
   const importarElenco = (linhas) => {
     // A planilha não traz categoria; vale a que estiver selecionada no
     // radar de notícias. Profissional é o padrão.
-    const catImport = catBusca || "pro";
+    const catImport = filtroCat || catBusca || "pro";
 
     // A competição da planilha é a que aparece em quase todos os atletas.
     const contagem = new Map();
@@ -2035,6 +2042,24 @@ function Painel() {
             }}
           >Pesquisar</button>
 
+          <button
+            className="btn"
+            style={{ alignSelf: "flex-end" }}
+            onClick={puxarDoOgol}
+            disabled={puxando || !edicaoAtual || !filtroPos}
+            title={
+              !filtroPos
+                ? "escolha a posição"
+                : !filtroComp
+                ? "escolha a competição"
+                : !edicaoAtual
+                ? `sem ID de edição para ${filtroComp}`
+                : "extrai posição, jogos e minutos pela sua API local"
+            }
+          >
+            {puxando ? "extraindo…" : "Puxar elenco do ogol"}
+          </button>
+
           {consulta && (
             <button
               className="btn ghost"
@@ -2132,22 +2157,6 @@ function Painel() {
             )}
 
             <div className="popNota">
-              {compBusca && (
-                <div style={{ marginBottom: 6 }}>
-                  {edicaoAtual ? (
-                    <>
-                      <b>Puxar elenco do ogol</b> extrai posição, jogos e minutos
-                      pela sua API local. Demora — deixe rodando e siga usando
-                      o painel.
-                    </>
-                  ) : (
-                    <>
-                      Sem ID de edição para <b>{compBusca}</b>: cadastre em
-                      EDICOES_OGOL para liberar a extração automática.
-                    </>
-                  )}
-                </div>
-              )}
               <b>Buscar notícias</b> traz só quem teve algum acontecimento.
               <b> Trazer os clubes</b> cria a ficha de todos — inclusive dos que
               estão quietos, que é onde mora a antecipação.
@@ -2177,18 +2186,6 @@ function Painel() {
               </button>
               <button className="btn" onClick={importarCompeticao} disabled={!alvosDaBusca.length}>
                 Trazer os {alvosDaBusca.length} clubes para o radar
-              </button>
-              <button
-                className="btn"
-                onClick={puxarDoOgol}
-                disabled={puxando || !edicaoAtual}
-                title={
-                  edicaoAtual
-                    ? "extrai o elenco pela API local"
-                    : "sem ID de edição para esta competição"
-                }
-              >
-                {puxando ? "puxando…" : "Puxar elenco do ogol"}
               </button>
               <button
                 className="btn ghost"
