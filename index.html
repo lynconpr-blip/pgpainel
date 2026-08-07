@@ -29,6 +29,10 @@
  *  CONFIGURAÇÃO — cole aqui o link do seu Apps Script                *
  *  Deve terminar em /exec                                            *
  * ================================================================== */
+/* Endereço da sua API do ogol (uvicorn). Só funciona na máquina em
+   que ela está rodando. */
+var URL_OGOL = "http://localhost:8000";
+
 var URL_PLANILHA = "https://script.google.com/macros/s/AKfycbyUfCWx2wyKuaGa3JcA5xqsGx4GzWDMZTMRxKBdonE_qkrTrsM6nVgZ4_xh64IjHHM/exec";
 
 
@@ -59,6 +63,7 @@ var configurado =
   URL_PLANILHA.indexOf("COLE_AQUI") === -1;
 
 if (configurado) window.PG_URL = URL_PLANILHA;
+window.PG_OGOL = URL_OGOL.replace(/\/+$/, "");
 
 /* O Apps Script hiberna quando fica sem uso e a primeira chamada pode
    levar mais de meio minuto para acordar. Damos prazo largo e uma
@@ -270,6 +275,36 @@ const CLUBES_POR_COMPETICAO = {
     "América de Propriá", "Atlético Gloriense", "Desportiva Aracaju",
     "Falcon", "Guarany", "Lagarto",
   ],
+};
+
+/* ==================================================================
+   EDIÇÕES NO OGOL — para o botão que puxa o elenco pela sua API.
+
+   A chave é o nome exato da competição no seletor do painel; o valor
+   é o ID da edição no ogol. Para descobrir o ID, abra a competição no
+   site: ele aparece na URL.
+   ================================================================== */
+const EDICOES_OGOL = {
+  "Série C": "210279",
+  "Paulista A2": "210093",
+  "Paulista A3": "210256",
+  "Carioca Série A": "203735",
+  "Carioca Série A2": "213877",
+  "Mineiro Módulo I": "209315",
+  "Mineiro Módulo II": "210174",
+  "Capixaba Série A": "210101",
+};
+
+/* A API aceita esta lista fechada de posições; o painel usa códigos
+   curtos. "Ponta" existe lá e não aqui, então cai em atacante. */
+const POSICAO_NA_API = {
+  ld: "lateral direito",
+  le: "lateral esquerdo",
+  zag: "zagueiro",
+  vol: "volante",
+  mei: "meia",
+  ata: "atacante",
+  gol: "goleiro",
 };
 
 /* Janelas de tempo aceitas pelo Google Notícias. */
@@ -632,6 +667,8 @@ function Painel() {
   const [bidTexto, setBidTexto] = useState("");
   const [colarBid, setColarBid] = useState(false);
   const [buscando, setBuscando] = useState(false);
+  const [puxando, setPuxando] = useState(false);
+  const [progressoOgol, setProgressoOgol] = useState("");
   const [popBusca, setPopBusca] = useState(false);
   const [posBusca, setPosBusca] = useState("ld");
   const [catBusca, setCatBusca] = useState("pro");
@@ -1083,6 +1120,97 @@ function Painel() {
         (a.posicao || "ld") === (ficha.posicao || "ld") &&
         (a.categoria || "pro") === (ficha.categoria || "pro")
     );
+
+  /* ---- elenco puxado da sua API do ogol -------------------------- */
+
+  const edicaoAtual = EDICOES_OGOL[compBusca] || "";
+
+  /**
+   * Dispara a extração na API local e acompanha até terminar.
+   * A varredura é longa, então o trabalho roda em segundo plano e o
+   * painel só pergunta o status de tempos em tempos.
+   */
+  const puxarDoOgol = async () => {
+    const api = window.PG_OGOL;
+    if (!api) {
+      setErro("Endereço da API não configurado no arquivo.");
+      return;
+    }
+    if (!edicaoAtual) {
+      setErro(
+        `Não tenho o ID de edição da competição "${compBusca}". ` +
+          "Adicione em EDICOES_OGOL, no topo do arquivo."
+      );
+      return;
+    }
+
+    const posApi = POSICAO_NA_API[posBusca];
+    if (!posApi) {
+      setErro("Essa posição não existe na API.");
+      return;
+    }
+
+    setPuxando(true);
+    setErro("");
+    setPopBusca(false);
+    setProgressoOgol("iniciando…");
+
+    try {
+      const inicio = await fetch(api + "/extracoes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          edicao: edicaoAtual,
+          posicao: posApi,
+          rotulo: compBusca,
+          detalhar: true,
+          so_ativos: true,
+          cache_dias: 7,
+          aguardar_ate: 20,   // se estiver tudo em cache, já volta pronto
+        }),
+      });
+
+      if (!inicio.ok) {
+        const txt = await inicio.text();
+        throw new Error(`a API respondeu ${inicio.status}: ${txt.slice(0, 160)}`);
+      }
+
+      let job = await inicio.json();
+
+      // Enquanto roda, pergunta a cada 5s. Teto de 90 minutos.
+      const limite = Date.now() + 90 * 60 * 1000;
+      while (job.status === "rodando" && Date.now() < limite) {
+        setProgressoOgol(job.progresso || "varrendo o ogol…");
+        await new Promise((r) => setTimeout(r, 5000));
+        const r = await fetch(`${api}/extracoes/${job.job_id}`);
+        job = await r.json();
+      }
+
+      if (job.status === "erro") {
+        throw new Error(job.erro || "a extração falhou — veja o log da API");
+      }
+      if (job.status === "rodando") {
+        throw new Error("passou de 90 minutos; confira direto na API");
+      }
+      if (!job.dados || !job.dados.length) {
+        setErro("A extração terminou sem nenhum atleta nessa posição.");
+        return;
+      }
+
+      // Mesma rotina do CSV: a API devolve as mesmas colunas.
+      importarElenco(job.dados);
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      setErro(
+        /fetch|Failed|NetworkError/i.test(msg)
+          ? "Não achei a API. Confira se o uvicorn está rodando nesta máquina."
+          : msg
+      );
+    } finally {
+      setPuxando(false);
+      setProgressoOgol("");
+    }
+  };
 
   /* ---- planilha de elenco por posição ---------------------------- */
 
@@ -2004,6 +2132,22 @@ function Painel() {
             )}
 
             <div className="popNota">
+              {compBusca && (
+                <div style={{ marginBottom: 6 }}>
+                  {edicaoAtual ? (
+                    <>
+                      <b>Puxar elenco do ogol</b> extrai posição, jogos e minutos
+                      pela sua API local. Demora — deixe rodando e siga usando
+                      o painel.
+                    </>
+                  ) : (
+                    <>
+                      Sem ID de edição para <b>{compBusca}</b>: cadastre em
+                      EDICOES_OGOL para liberar a extração automática.
+                    </>
+                  )}
+                </div>
+              )}
               <b>Buscar notícias</b> traz só quem teve algum acontecimento.
               <b> Trazer os clubes</b> cria a ficha de todos — inclusive dos que
               estão quietos, que é onde mora a antecipação.
@@ -2033,6 +2177,18 @@ function Painel() {
               </button>
               <button className="btn" onClick={importarCompeticao} disabled={!alvosDaBusca.length}>
                 Trazer os {alvosDaBusca.length} clubes para o radar
+              </button>
+              <button
+                className="btn"
+                onClick={puxarDoOgol}
+                disabled={puxando || !edicaoAtual}
+                title={
+                  edicaoAtual
+                    ? "extrai o elenco pela API local"
+                    : "sem ID de edição para esta competição"
+                }
+              >
+                {puxando ? "puxando…" : "Puxar elenco do ogol"}
               </button>
               <button
                 className="btn ghost"
@@ -2111,6 +2267,12 @@ function Painel() {
               onChange={(e) => setBulk(e.target.value)}
             />
             <button className="btn" style={{ marginTop: 8 }} onClick={importar}>Criar fichas</button>
+          </div>
+        )}
+
+        {puxando && (
+          <div className="eyebrow" style={{ color: C.amber, marginBottom: 10 }}>
+            Extraindo do ogol — {progressoOgol || "aguardando"}
           </div>
         )}
 
