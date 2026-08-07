@@ -779,11 +779,19 @@ function Painel() {
       .sort((a, b) => b._s - a._s || a.clube.localeCompare(b.clube));
   }, [clubes, filtro, consulta]);
 
-  /* Competições presentes nas fichas — alimenta o filtro do ranking. */
-  const compsNoRanking = useMemo(
-    () => [...new Set(clubes.map((c) => c.competicao).filter(Boolean))].sort(),
-    [clubes]
-  );
+  /* Competições do filtro do ranking: as que já têm ficha MAIS as que
+     têm ID no ogol. Sem estas últimas o botão de extração ficaria
+     inalcançável — você precisaria da ficha para criar a ficha. */
+  const compsNoRanking = useMemo(() => {
+    const nasFichas = new Set(clubes.map((c) => c.competicao).filter(Boolean));
+    const comId = Object.keys(EDICOES_OGOL);
+    return [...new Set([...nasFichas, ...comId])].sort((a, b) =>
+      a.localeCompare(b, "pt-BR")
+    );
+  }, [clubes]);
+
+  /* Marca no seletor quais competições dá para extrair direto. */
+  const temExtracao = (nome) => !!EDICOES_OGOL[nome];
 
   /* Posições presentes nas fichas, com a contagem de cada uma. */
   const posNoRanking = useMemo(() => {
@@ -1706,6 +1714,7 @@ function Painel() {
         .pagNum.ativo { background:${C.amber}; border-color:${C.amber}; color:#1B1204; font-weight:600; }
         .filtros { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px; }
         .filtros .popCampo { min-width:170px; }
+        .dicaExtracao { align-self:flex-end; padding-bottom:9px; font-size:12px; color:#93AB9E; }
         .btnSecao { margin-left:12px; background:none; border:1px solid rgba(255,255,255,.24);
           color:#A9BFB2; padding:3px 9px; border-radius:2px; cursor:pointer; vertical-align:middle;
           font-family:'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:.08em;
@@ -2028,7 +2037,11 @@ function Painel() {
               onChange={(e) => { setFiltroComp(e.target.value); setPagina(0); setAberto(null); }}
             >
               <option value="">todas</option>
-              {compsNoRanking.map((c) => <option key={c} value={c}>{c}</option>)}
+              {compsNoRanking.map((c) => (
+                <option key={c} value={c}>
+                  {c}{temExtracao(c) ? " ⤓" : ""}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -2059,6 +2072,12 @@ function Painel() {
           >
             {puxando ? "extraindo…" : "Puxar elenco do ogol"}
           </button>
+
+          {filtroComp && !edicaoAtual && (
+            <span className="dicaExtracao">
+              sem ID de edição para {filtroComp}
+            </span>
+          )}
 
           {consulta && (
             <button
