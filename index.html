@@ -822,15 +822,11 @@ function Painel() {
   /* Marca no seletor quais competições dá para extrair direto. */
   const temExtracao = (nome) => !!EDICOES_OGOL[nome];
 
-  /* Posições presentes nas fichas, com a contagem de cada uma. */
-  const posNoRanking = useMemo(() => {
-    const m = new Map();
-    for (const c of clubes) {
-      const k = c.posicao || "ld";
-      m.set(k, (m.get(k) || 0) + 1);
-    }
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
-  }, [clubes]);
+  /* Todas as posições do catálogo, na ordem de POSICOES.
+     Este seletor não espelha mais as fichas existentes: ele é filtro e,
+     principalmente, ponto de partida da extração no ogol — então precisa
+     oferecer posição que ainda não tem ficha nenhuma. */
+  const posNoRanking = useMemo(() => POSICOES.map((p) => p.id), []);
 
   const importar = () => {
     const linhas = bulk.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -2039,9 +2035,9 @@ function Painel() {
               value={filtroPos}
               onChange={(e) => { setFiltroPos(e.target.value); setPagina(0); setAberto(null); }}
             >
-              <option value="">todas ({clubes.length})</option>
-              {posNoRanking.map(([id, n]) => (
-                <option key={id} value={id}>{rotuloPos(id)} ({n})</option>
+              <option value="">todas</option>
+              {posNoRanking.map((id) => (
+                <option key={id} value={id}>{rotuloPos(id)}</option>
               ))}
             </select>
           </div>
