@@ -1204,7 +1204,7 @@ function Painel() {
           posicao: posApi,
           rotulo: filtroComp,
           detalhar: true,
-          so_ativos: true,
+          so_ativos: false,   // eliminado tambem interessa: e quem libera atleta
           cache_dias: 7,
           aguardar_ate: 20,   // se estiver tudo em cache, já volta pronto
         }),
@@ -1237,8 +1237,21 @@ function Painel() {
         return;
       }
 
-      // Mesma rotina do CSV: a API devolve as mesmas colunas.
-      importarElenco(job.dados);
+      // Participantes reais da edição, direto do ogol. Sem isso o painel
+      // cai na lista fixa de CLUBES_POR_COMPETICAO, que envelhece e inventa
+      // clube de outra divisão.
+      let participantes = null;
+      try {
+        const rc = await fetch(`${api}/edicoes/${edicaoAtual}/clubes`);
+        if (rc.ok) {
+          const d = await rc.json();
+          participantes = (d.clubes || []).map((c) => c.nome).filter(Boolean);
+        }
+      } catch (e) {
+        participantes = null;   // sem lista, importarElenco usa a fixa
+      }
+
+      importarElenco(job.dados, participantes);
     } catch (e) {
       const msg = String((e && e.message) || e);
       setErro(
@@ -1364,7 +1377,10 @@ function Painel() {
 
     // 2. participantes da competição que ainda não tinham ficha nenhuma —
     //    sem isso eles ficariam invisíveis justamente por não ter ninguém.
-    const participantes = CLUBES_POR_COMPETICAO[daPlanilha] || [];
+    const participantes =
+      (participantesReais && participantesReais.length)
+        ? participantesReais
+        : (CLUBES_POR_COMPETICAO[daPlanilha] || []);
     for (const item of participantes) {
       const nomeClube = typeof item === "string" ? item : item.nome;
       for (const pos of posicoesDaPlanilha) {
