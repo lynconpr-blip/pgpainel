@@ -285,8 +285,8 @@ const CLUBES_POR_COMPETICAO = {
    site: ele aparece na URL.
    ================================================================== */
 const EDICOES_OGOL = {
-  "Série C": "210279",
   "Série D": "212952",
+  "Série C": "210279",
   "Paulista A2": "210093",
   "Paulista A3": "210256",
   "Carioca Série A": "203735",
@@ -299,13 +299,21 @@ const EDICOES_OGOL = {
 /* A API aceita esta lista fechada de posições; o painel usa códigos
    curtos. "Ponta" existe lá e não aqui, então cai em atacante. */
 const POSICAO_NA_API = {
+  gol: "goleiro",
+  zag: "zagueiro",
   ld: "lateral direito",
   le: "lateral esquerdo",
-  zag: "zagueiro",
   vol: "volante",
+  mc: "meia central",
   mei: "meia",
+  me: "meia esquerda",
+  md: "meia direita",
+  mo: "meia ofensivo",
+  sa: "2º atacante",
+  pd: "ponta direita",
+  pe: "ponta esquerda",
+  ca: "centroavante",
   ata: "atacante",
-  gol: "goleiro",
 };
 
 /* Janelas de tempo aceitas pelo Google Notícias. */
@@ -325,22 +333,42 @@ const PERIODOS = [
    imprensa costuma escrever só "lateral". `termos` é o filtro fino,
    aplicado depois sobre o título. */
 const POSICOES = [
-  { id: "ld", label: "Lateral-direito", busca: ["lateral"],
+  { id: "gol", label: "Goleiro", busca: ["goleiro"],
+    termos: ["goleiro", "arqueiro", "guarda-redes"] },
+  { id: "zag", label: "Zagueiro", busca: ["zagueiro"],
+    termos: ["zagueiro", "zaga", "defensor", "defesa central"] },
+  { id: "ld", label: "Lateral Direito", busca: ["lateral"],
     termos: ["lateral-direito", "lateral direito", "lateral da direita", "ala-direito", "lateral"],
     excluir: ["lateral-esquerdo", "lateral esquerdo", "lateral da esquerda", "ala-esquerdo"] },
-  { id: "le", label: "Lateral-esquerdo", busca: ["lateral"],
+  { id: "le", label: "Lateral Esquerdo", busca: ["lateral"],
     termos: ["lateral-esquerdo", "lateral esquerdo", "lateral da esquerda", "ala-esquerdo", "lateral"],
     excluir: ["lateral-direito", "lateral direito", "lateral da direita", "ala-direito"] },
-  { id: "zag", label: "Zagueiro", busca: ["zagueiro"],
-    termos: ["zagueiro", "zaga", "defensor"] },
   { id: "vol", label: "Volante", busca: ["volante"],
-    termos: ["volante", "primeiro volante", "cabeca de area"] },
+    termos: ["volante", "primeiro volante", "cabeca de area", "trinco"] },
+  { id: "mc", label: "Meia Central", busca: ["meia"],
+    termos: ["meia central", "meio-campo central", "medio centro"] },
   { id: "mei", label: "Meia", busca: ["meia"],
     termos: ["meia", "meio-campista", "camisa 10"] },
-  { id: "ata", label: "Atacante", busca: ["atacante"],
+  { id: "me", label: "Meia Esquerda", busca: ["meia"],
+    termos: ["meia esquerda", "meia-esquerda", "medio esquerdo"],
+    excluir: ["meia direita", "meia-direita"] },
+  { id: "md", label: "Meia Direita", busca: ["meia"],
+    termos: ["meia direita", "meia-direita", "medio direito"],
+    excluir: ["meia esquerda", "meia-esquerda"] },
+  { id: "mo", label: "Meia Ofensivo", busca: ["meia"],
+    termos: ["meia ofensivo", "meia-atacante", "camisa 10", "armador"] },
+  { id: "sa", label: "2º Atacante", busca: ["atacante"],
+    termos: ["segundo atacante", "2o atacante", "atacante de apoio"] },
+  { id: "pd", label: "Ponta Direita", busca: ["ponta"],
+    termos: ["ponta direita", "ponta-direita", "extremo direito"],
+    excluir: ["ponta esquerda", "ponta-esquerda"] },
+  { id: "pe", label: "Ponta Esquerda", busca: ["ponta"],
+    termos: ["ponta esquerda", "ponta-esquerda", "extremo esquerdo"],
+    excluir: ["ponta direita", "ponta-direita"] },
+  { id: "ca", label: "Centroavante", busca: ["centroavante"],
+    termos: ["centroavante", "centro-avante", "camisa 9"] },
+  { id: "ata", label: "Atacante (geral)", busca: ["atacante"],
     termos: ["atacante", "centroavante", "ponta"] },
-  { id: "gol", label: "Goleiro", busca: ["goleiro"],
-    termos: ["goleiro", "arqueiro"] },
 ];
 
 /* Categorias em que a agência atua. A categoria muda a leitura do
