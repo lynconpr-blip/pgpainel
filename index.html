@@ -1251,7 +1251,7 @@ function Painel() {
         participantes = null;   // sem lista, importarElenco usa a fixa
       }
 
-      importarElenco(job.dados, participantes);
+      importarElenco(job.dados, participantes, filtroPos);
     } catch (e) {
       const msg = String((e && e.message) || e);
       setErro(
@@ -1321,7 +1321,7 @@ function Painel() {
     return "";                               // desconhecido: nao inventa
   };
 
-  const importarElenco = (linhas, participantesReais) => {
+  const importarElenco = (linhas, participantesReais, posPedida) => {
     // A planilha não traz categoria; vale a que estiver selecionada no
     // radar de notícias. Profissional é o padrão.
     const catImport = filtroCat || catBusca || "pro";
@@ -1347,7 +1347,19 @@ function Painel() {
       const nome = (l._nome || "").trim();
       if (!clube || !nome) continue;
 
-      const pos = posicaoParaId(l._posicao);
+      // O ogol registra ate duas posicoes. Um zagueiro que tambem joga de
+      // lateral direito vem na extracao de lateral — e precisa ser arquivado
+      // como lateral, senao some do filtro que o trouxe.
+      const idsDoAtleta = [
+        posicaoParaId(l._posicao),
+        posicaoParaId(l._posicao_2),
+      ].filter(Boolean);
+
+      const pos =
+        (posPedida && idsDoAtleta.includes(posPedida))
+          ? posPedida
+          : (idsDoAtleta[0] || "ld");
+
       const k = chaveFicha(clube, pos, catImport);
 
       let c = mapa.get(k);
@@ -1372,6 +1384,13 @@ function Painel() {
         min: Number(l._minutos) || 0,
         jogos: Number(l._jogos) || 0,
         porComp: lerPorCompeticao(l._por_competicao),
+        posicao: l._posicao || "",
+        posicao2: l._posicao_2 || "",
+        // marca quem chegou aqui pela segunda posicao: no ranking ele nao
+        // e um especialista da posicao, e improvisado nela
+        segundaPos: !!(posPedida &&
+                       posicaoParaId(l._posicao) !== posPedida &&
+                       posicaoParaId(l._posicao_2) === posPedida),
       });
       atletas++;
     }
@@ -1431,8 +1450,9 @@ function Painel() {
     // atleta sem ficha bastava para o seletor pular para outra posicao
     const votos = new Map();
     for (const l of linhas) {
-      const p = posicaoParaId(l._posicao);
-      if (p) votos.set(p, (votos.get(p) || 0) + 1);
+      for (const p of [posicaoParaId(l._posicao), posicaoParaId(l._posicao_2)]) {
+        if (p) votos.set(p, (votos.get(p) || 0) + 1);
+      }
     }
     const posPrincipal =
       [...votos.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || filtroPos || "";
