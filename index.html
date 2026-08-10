@@ -285,7 +285,6 @@ const CLUBES_POR_COMPETICAO = {
    site: ele aparece na URL.
    ================================================================== */
 const EDICOES_OGOL = {
-  "Série D": "212952",
   "Série C": "210279",
   "Paulista A2": "210093",
   "Paulista A3": "210256",
@@ -294,27 +293,18 @@ const EDICOES_OGOL = {
   "Mineiro Módulo I": "209315",
   "Mineiro Módulo II": "210174",
   "Capixaba Série A": "210101",
-  "Gaúchão Acesso": "220440",
 };
 
 /* A API aceita esta lista fechada de posições; o painel usa códigos
    curtos. "Ponta" existe lá e não aqui, então cai em atacante. */
 const POSICAO_NA_API = {
-  gol: "goleiro",
-  zag: "zagueiro",
   ld: "lateral direito",
   le: "lateral esquerdo",
+  zag: "zagueiro",
   vol: "volante",
-  mc: "meia central",
   mei: "meia",
-  me: "meia esquerda",
-  md: "meia direita",
-  mo: "meia ofensivo",
-  sa: "2º atacante",
-  pd: "ponta direita",
-  pe: "ponta esquerda",
-  ca: "centroavante",
   ata: "atacante",
+  gol: "goleiro",
 };
 
 /* Janelas de tempo aceitas pelo Google Notícias. */
@@ -334,42 +324,22 @@ const PERIODOS = [
    imprensa costuma escrever só "lateral". `termos` é o filtro fino,
    aplicado depois sobre o título. */
 const POSICOES = [
-  { id: "gol", label: "Goleiro", busca: ["goleiro"],
-    termos: ["goleiro", "arqueiro", "guarda-redes"] },
-  { id: "zag", label: "Zagueiro", busca: ["zagueiro"],
-    termos: ["zagueiro", "zaga", "defensor", "defesa central"] },
-  { id: "ld", label: "Lateral Direito", busca: ["lateral"],
+  { id: "ld", label: "Lateral-direito", busca: ["lateral"],
     termos: ["lateral-direito", "lateral direito", "lateral da direita", "ala-direito", "lateral"],
     excluir: ["lateral-esquerdo", "lateral esquerdo", "lateral da esquerda", "ala-esquerdo"] },
-  { id: "le", label: "Lateral Esquerdo", busca: ["lateral"],
+  { id: "le", label: "Lateral-esquerdo", busca: ["lateral"],
     termos: ["lateral-esquerdo", "lateral esquerdo", "lateral da esquerda", "ala-esquerdo", "lateral"],
     excluir: ["lateral-direito", "lateral direito", "lateral da direita", "ala-direito"] },
+  { id: "zag", label: "Zagueiro", busca: ["zagueiro"],
+    termos: ["zagueiro", "zaga", "defensor"] },
   { id: "vol", label: "Volante", busca: ["volante"],
-    termos: ["volante", "primeiro volante", "cabeca de area", "trinco"] },
-  { id: "mc", label: "Meia Central", busca: ["meia"],
-    termos: ["meia central", "meio-campo central", "medio centro"] },
+    termos: ["volante", "primeiro volante", "cabeca de area"] },
   { id: "mei", label: "Meia", busca: ["meia"],
     termos: ["meia", "meio-campista", "camisa 10"] },
-  { id: "me", label: "Meia Esquerda", busca: ["meia"],
-    termos: ["meia esquerda", "meia-esquerda", "medio esquerdo"],
-    excluir: ["meia direita", "meia-direita"] },
-  { id: "md", label: "Meia Direita", busca: ["meia"],
-    termos: ["meia direita", "meia-direita", "medio direito"],
-    excluir: ["meia esquerda", "meia-esquerda"] },
-  { id: "mo", label: "Meia Ofensivo", busca: ["meia"],
-    termos: ["meia ofensivo", "meia-atacante", "camisa 10", "armador"] },
-  { id: "sa", label: "2º Atacante", busca: ["atacante"],
-    termos: ["segundo atacante", "2o atacante", "atacante de apoio"] },
-  { id: "pd", label: "Ponta Direita", busca: ["ponta"],
-    termos: ["ponta direita", "ponta-direita", "extremo direito"],
-    excluir: ["ponta esquerda", "ponta-esquerda"] },
-  { id: "pe", label: "Ponta Esquerda", busca: ["ponta"],
-    termos: ["ponta esquerda", "ponta-esquerda", "extremo esquerdo"],
-    excluir: ["ponta direita", "ponta-direita"] },
-  { id: "ca", label: "Centroavante", busca: ["centroavante"],
-    termos: ["centroavante", "centro-avante", "camisa 9"] },
-  { id: "ata", label: "Atacante (geral)", busca: ["atacante"],
+  { id: "ata", label: "Atacante", busca: ["atacante"],
     termos: ["atacante", "centroavante", "ponta"] },
+  { id: "gol", label: "Goleiro", busca: ["goleiro"],
+    termos: ["goleiro", "arqueiro"] },
 ];
 
 /* Categorias em que a agência atua. A categoria muda a leitura do
@@ -823,11 +793,15 @@ function Painel() {
   /* Marca no seletor quais competições dá para extrair direto. */
   const temExtracao = (nome) => !!EDICOES_OGOL[nome];
 
-  /* Todas as posições do catálogo, na ordem de POSICOES.
-     Este seletor não espelha mais as fichas existentes: ele é filtro e,
-     principalmente, ponto de partida da extração no ogol — então precisa
-     oferecer posição que ainda não tem ficha nenhuma. */
-  const posNoRanking = useMemo(() => POSICOES.map((p) => p.id), []);
+  /* Posições presentes nas fichas, com a contagem de cada uma. */
+  const posNoRanking = useMemo(() => {
+    const m = new Map();
+    for (const c of clubes) {
+      const k = c.posicao || "ld";
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [clubes]);
 
   const importar = () => {
     const linhas = bulk.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -1205,7 +1179,7 @@ function Painel() {
           posicao: posApi,
           rotulo: filtroComp,
           detalhar: true,
-          so_ativos: false,   // eliminado tambem interessa: e quem libera atleta
+          so_ativos: true,
           cache_dias: 7,
           aguardar_ate: 20,   // se estiver tudo em cache, já volta pronto
         }),
@@ -1238,21 +1212,8 @@ function Painel() {
         return;
       }
 
-      // Participantes reais da edição, direto do ogol. Sem isso o painel
-      // cai na lista fixa de CLUBES_POR_COMPETICAO, que envelhece e inventa
-      // clube de outra divisão.
-      let participantes = null;
-      try {
-        const rc = await fetch(`${api}/edicoes/${edicaoAtual}/clubes`);
-        if (rc.ok) {
-          const d = await rc.json();
-          participantes = (d.clubes || []).map((c) => c.nome).filter(Boolean);
-        }
-      } catch (e) {
-        participantes = null;   // sem lista, importarElenco usa a fixa
-      }
-
-      importarElenco(job.dados, participantes, filtroPos);
+      // Mesma rotina do CSV: a API devolve as mesmas colunas.
+      importarElenco(job.dados);
     } catch (e) {
       const msg = String((e && e.message) || e);
       setErro(
@@ -1284,45 +1245,19 @@ function Painel() {
 
   /** "Lateral Direito" -> "ld". Cai em lateral-direito se não reconhecer. */
   const posicaoParaId = (texto) => {
-    // troca pontuacao por espaco: "2º Atacante" -> "2 atacante",
-    // "lateral-direito" -> "lateral direito"
-    const t = nomeSimples(texto).replace(/[^a-z0-9]+/g, " ").trim();
-    if (!t) return "";                       // sem ficha: nao chuta posicao
-
-    // laterais antes de zagueiro: "lateral direito" tambem casa "defesa"
-    if (t.includes("lateral") || t.includes("defesa direit") ||
-        t.includes("defesa esquerd")) {
-      if (t.includes("esquerd")) return "le";
-      if (t.includes("direit")) return "ld";
-    }
-    if (t.includes("zagueiro") || t.includes("zaga") ||
-        t.includes("defesa central")) return "zag";
-    if (t.includes("goleiro") || t.includes("guarda")) return "gol";
-    if (t.includes("volante") || t.includes("trinco")) return "vol";
-
-    // meias: variantes antes do generico
-    if (t.includes("meia") || t.includes("meio") || t.includes("medio")) {
-      if (t.includes("esquerd")) return "me";
-      if (t.includes("direit")) return "md";
-      if (t.includes("ofensiv")) return "mo";
-      if (t.includes("central") || t.includes("centro")) return "mc";
-      return "mei";
-    }
-
-    // ataque: variantes antes do generico
-    if (t.includes("centroavante") || t.includes("centro avante")) return "ca";
-    if (t.includes("ponta") || t.includes("extremo")) {
-      if (t.includes("esquerd")) return "pe";
-      if (t.includes("direit")) return "pd";
+    const t = nomeSimples(texto);
+    if (t.includes("lateral") && t.includes("esquerd")) return "le";
+    if (t.includes("lateral") && t.includes("direit")) return "ld";
+    if (t.includes("zagueiro") || t.includes("zaga")) return "zag";
+    if (t.includes("volante")) return "vol";
+    if (t.includes("meia") || t.includes("meio")) return "mei";
+    if (t.includes("atacante") || t.includes("centroavante") || t.includes("ponta"))
       return "ata";
-    }
-    if (/\b2 ?o? ?atacante\b/.test(t) || t.includes("segundo atacante")) return "sa";
-    if (t.includes("atacante") || t.includes("avancado")) return "ata";
-
-    return "";                               // desconhecido: nao inventa
+    if (t.includes("goleiro")) return "gol";
+    return "ld";
   };
 
-  const importarElenco = (linhas, participantesReais, posPedida) => {
+  const importarElenco = (linhas) => {
     // A planilha não traz categoria; vale a que estiver selecionada no
     // radar de notícias. Profissional é o padrão.
     const catImport = filtroCat || catBusca || "pro";
@@ -1348,19 +1283,7 @@ function Painel() {
       const nome = (l._nome || "").trim();
       if (!clube || !nome) continue;
 
-      // O ogol registra ate duas posicoes. Um zagueiro que tambem joga de
-      // lateral direito vem na extracao de lateral — e precisa ser arquivado
-      // como lateral, senao some do filtro que o trouxe.
-      const idsDoAtleta = [
-        posicaoParaId(l._posicao),
-        posicaoParaId(l._posicao_2),
-      ].filter(Boolean);
-
-      const pos =
-        (posPedida && idsDoAtleta.includes(posPedida))
-          ? posPedida
-          : (idsDoAtleta[0] || "ld");
-
+      const pos = posicaoParaId(l._posicao);
       const k = chaveFicha(clube, pos, catImport);
 
       let c = mapa.get(k);
@@ -1385,13 +1308,6 @@ function Painel() {
         min: Number(l._minutos) || 0,
         jogos: Number(l._jogos) || 0,
         porComp: lerPorCompeticao(l._por_competicao),
-        posicao: l._posicao || "",
-        posicao2: l._posicao_2 || "",
-        // marca quem chegou aqui pela segunda posicao: no ranking ele nao
-        // e um especialista da posicao, e improvisado nela
-        segundaPos: !!(posPedida &&
-                       posicaoParaId(l._posicao) !== posPedida &&
-                       posicaoParaId(l._posicao_2) === posPedida),
       });
       atletas++;
     }
@@ -1423,10 +1339,7 @@ function Painel() {
 
     // 2. participantes da competição que ainda não tinham ficha nenhuma —
     //    sem isso eles ficariam invisíveis justamente por não ter ninguém.
-    const participantes =
-      (participantesReais && participantesReais.length)
-        ? participantesReais
-        : (CLUBES_POR_COMPETICAO[daPlanilha] || []);
+    const participantes = CLUBES_POR_COMPETICAO[daPlanilha] || [];
     for (const item of participantes) {
       const nomeClube = typeof item === "string" ? item : item.nome;
       for (const pos of posicoesDaPlanilha) {
@@ -1447,16 +1360,7 @@ function Painel() {
 
     commit({ clubes: [...mapa.values()] });
     if (daPlanilha) setFiltroComp(daPlanilha);
-    // a posicao que domina o resultado, nao a da primeira linha: um unico
-    // atleta sem ficha bastava para o seletor pular para outra posicao
-    const votos = new Map();
-    for (const l of linhas) {
-      for (const p of [posicaoParaId(l._posicao), posicaoParaId(l._posicao_2)]) {
-        if (p) votos.set(p, (votos.get(p) || 0) + 1);
-      }
-    }
-    const posPrincipal =
-      [...votos.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || filtroPos || "";
+    const posPrincipal = linhas.length ? posicaoParaId(linhas[0]._posicao) : "";
     if (posPrincipal) setFiltroPos(posPrincipal);
     setFiltroCat(catImport);
     setConsulta({ pos: posPrincipal, comp: daPlanilha, cat: catImport });
@@ -1527,30 +1431,72 @@ function Painel() {
      1. da lista fixa no código, se a competição estiver lá;
      2. senão, das fichas que já tenham essa competição/UF. */
   const alvosDaBusca = useMemo(() => {
+    // 1. As fichas que já existem para esta posição e competição mandam.
+    //    Elas vieram do ogol ou do BID, então trazem o elenco real — e
+    //    é nelas que a notícia tem de pousar, sem criar ficha nova.
+    const jaNoRadar = clubes.filter(
+      (c) =>
+        c.clube &&
+        (c.posicao || "ld") === posBusca &&
+        (!compBusca || c.competicao === compBusca) &&
+        (!ufBusca || (c.uf || "").toUpperCase() === ufBusca)
+    );
+
+    if (jaNoRadar.length) {
+      return jaNoRadar.map((c) => ({
+        clube: c.clube,
+        evitar: [],
+        uf: c.uf,
+        competicao: c.competicao,
+        categoria: c.categoria,
+        fichaId: c.id,
+        jogadores: (c.laterais || []).map((x) => x.nome).filter(Boolean),
+      }));
+    }
+
+    // 2. Sem fichas ainda: cai na lista de participantes do código.
     const doCodigo = compBusca ? CLUBES_POR_COMPETICAO[compBusca] : null;
     if (doCodigo && doCodigo.length) {
       return doCodigo.map((x) => {
         const nome = typeof x === "string" ? x : x.nome;
         const evitar = typeof x === "string" ? [] : x.evitar || [];
-        return { clube: nome, evitar, uf: ufBusca, competicao: compBusca };
+        return { clube: nome, evitar, uf: ufBusca, competicao: compBusca,
+                 jogadores: [] };
       });
     }
-    return clubes.filter(
-      (c) =>
-        c.clube &&
-        (!ufBusca || (c.uf || "").toUpperCase() === ufBusca) &&
-        (!compBusca || c.competicao === compBusca)
-    );
-  }, [clubes, ufBusca, compBusca]);
+
+    // 3. Nem isso: qualquer ficha que bata com UF/competição.
+    return clubes
+      .filter(
+        (c) =>
+          c.clube &&
+          (!ufBusca || (c.uf || "").toUpperCase() === ufBusca) &&
+          (!compBusca || c.competicao === compBusca)
+      )
+      .map((c) => ({
+        clube: c.clube,
+        evitar: [],
+        uf: c.uf,
+        competicao: c.competicao,
+        categoria: c.categoria,
+        fichaId: c.id,
+        jogadores: (c.laterais || []).map((x) => x.nome).filter(Boolean),
+      }));
+  }, [clubes, ufBusca, compBusca, posBusca]);
 
   const alvosVemDoCodigo = !!(
     compBusca && CLUBES_POR_COMPETICAO[compBusca] && CLUBES_POR_COMPETICAO[compBusca].length
   );
 
   const buscarNoticias = async () => {
-    const alvos = alvosDaBusca.map((c) =>
-      c.evitar && c.evitar.length ? { nome: c.clube, evitar: c.evitar } : c.clube
-    );
+    // Cada alvo vai como objeto: além do nome, o que evitar e os atletas
+    // que já conhecemos ali — é o que permite achar notícia que cita o
+    // jogador sem escrever a posição.
+    const alvos = alvosDaBusca.map((c) => ({
+      nome: c.clube,
+      evitar: c.evitar || [],
+      jogadores: c.jogadores || [],
+    }));
     if (!alvos.length) {
       setErro("Nenhum clube nessa busca. Cadastre os participantes em CLUBES_POR_COMPETICAO, no topo do arquivo, ou preencha o campo Competição das fichas.");
       return;
@@ -1597,25 +1543,51 @@ function Painel() {
 
       // A ficha é clube + posição: o mesmo clube pode estar no radar por
       // lateral-direito e por goleiro, com elencos e notas separados.
-      const mapa = new Map(
-        clubes.map((c) => [chaveFicha(c.clube, c.posicao, c.categoria), { ...c }])
-      );
+      const porId = new Map(clubes.map((c) => [c.id, { ...c }]));
       let novos = 0, fichasNovas = 0;
 
-      for (const a of j.alertas || []) {
-        const k = chaveFicha(a.clube, posBusca, catBusca);
-        let c = mapa.get(k);
-        if (!c) {
-          // Clube ainda sem ficha nesta posição: a notícia o traz ao radar.
-          const origem =
-            alvosDaBusca.find((x) => normNome(x.clube) === normNome(a.clube)) || {};
-          c = { ...novoClube(), clube: a.clube, posicao: posBusca,
-                categoria: catBusca,
-                uf: origem.uf || ufBusca || "",
-                competicao: origem.competicao || compBusca || "" };
-          mapa.set(k, c);
-          fichasNovas++;
+      /** Onde esta notícia deve pousar. Nunca cria ficha à toa. */
+      const acharFicha = (nomeClube) => {
+        const alvo = alvosDaBusca.find(
+          (x) => normNome(x.clube) === normNome(nomeClube)
+        );
+
+        // 1. A busca partiu de uma ficha existente: é ela, com a
+        //    competição e a categoria que ela já tem.
+        if (alvo && alvo.fichaId && porId.has(alvo.fichaId)) {
+          return porId.get(alvo.fichaId);
         }
+
+        // 2. Existe ficha desse clube nesta posição? Usa a que estiver
+        //    na competição da busca; senão, a primeira que houver.
+        const mesmas = [...porId.values()].filter(
+          (c) =>
+            normNome(c.clube) === normNome(nomeClube) &&
+            (c.posicao || "ld") === posBusca
+        );
+        if (mesmas.length) {
+          return (
+            mesmas.find((c) => c.competicao === (alvo?.competicao || compBusca)) ||
+            mesmas[0]
+          );
+        }
+
+        // 3. Clube novo de verdade: aí sim abre ficha.
+        const nova = {
+          ...novoClube(),
+          clube: nomeClube,
+          posicao: posBusca,
+          categoria: (alvo && alvo.categoria) || catBusca,
+          uf: (alvo && alvo.uf) || ufBusca || "",
+          competicao: (alvo && alvo.competicao) || compBusca || "",
+        };
+        porId.set(nova.id, nova);
+        fichasNovas++;
+        return nova;
+      };
+
+      for (const a of j.alertas || []) {
+        const c = acharFicha(a.clube);
         c.sinais = c.sinais || [];
         // Contratação na posição fecha a vaga: o sinal existe, mas empurra
         // o clube para baixo em vez de subir.
@@ -1624,6 +1596,7 @@ function Painel() {
         const sig = {
           fonte: a.fonte || "notícia",
           quando: dataBR(a.data) || HOJE(),
+          atleta: a.atleta || "",
           peso: chegou ? -25 : Math.min(Number(a.pontos) || 0, 6) * 4,
           texto:
             (chegou ? "[vaga fechada] " : "") +
@@ -1643,12 +1616,14 @@ function Painel() {
         }
       }
 
-      if (novos) commit({ clubes: [...mapa.values()] });
+      if (novos) commit({ clubes: [...porId.values()] });
       if (novos) setConsulta({ pos: posBusca, comp: compBusca || "", cat: catBusca });
       setAviso(
         novos
           ? `${novos} ${novos === 1 ? "alerta novo" : "alertas novos"}` +
-            (fichasNovas ? ` · ${fichasNovas} clube(s) entrou(ram) no radar` : "") +
+            (fichasNovas
+              ? ` · ${fichasNovas} clube(s) novo(s)`
+              : " · todos em fichas que já existiam") +
             " — a lista já foi reordenada"
           : (() => {
               const d = j.diagnostico || {};
@@ -2106,9 +2081,9 @@ function Painel() {
               value={filtroPos}
               onChange={(e) => { setFiltroPos(e.target.value); setPagina(0); setAberto(null); }}
             >
-              <option value="">todas</option>
-              {posNoRanking.map((id) => (
-                <option key={id} value={id}>{rotuloPos(id)}</option>
+              <option value="">todas ({clubes.length})</option>
+              {posNoRanking.map(([id, n]) => (
+                <option key={id} value={id}>{rotuloPos(id)} ({n})</option>
               ))}
             </select>
           </div>
