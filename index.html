@@ -1283,19 +1283,45 @@ function Painel() {
 
   /** "Lateral Direito" -> "ld". Cai em lateral-direito se não reconhecer. */
   const posicaoParaId = (texto) => {
-    const t = nomeSimples(texto);
-    if (t.includes("lateral") && t.includes("esquerd")) return "le";
-    if (t.includes("lateral") && t.includes("direit")) return "ld";
-    if (t.includes("zagueiro") || t.includes("zaga")) return "zag";
-    if (t.includes("volante")) return "vol";
-    if (t.includes("meia") || t.includes("meio")) return "mei";
-    if (t.includes("atacante") || t.includes("centroavante") || t.includes("ponta"))
+    // troca pontuacao por espaco: "2º Atacante" -> "2 atacante",
+    // "lateral-direito" -> "lateral direito"
+    const t = nomeSimples(texto).replace(/[^a-z0-9]+/g, " ").trim();
+    if (!t) return "";                       // sem ficha: nao chuta posicao
+
+    // laterais antes de zagueiro: "lateral direito" tambem casa "defesa"
+    if (t.includes("lateral") || t.includes("defesa direit") ||
+        t.includes("defesa esquerd")) {
+      if (t.includes("esquerd")) return "le";
+      if (t.includes("direit")) return "ld";
+    }
+    if (t.includes("zagueiro") || t.includes("zaga") ||
+        t.includes("defesa central")) return "zag";
+    if (t.includes("goleiro") || t.includes("guarda")) return "gol";
+    if (t.includes("volante") || t.includes("trinco")) return "vol";
+
+    // meias: variantes antes do generico
+    if (t.includes("meia") || t.includes("meio") || t.includes("medio")) {
+      if (t.includes("esquerd")) return "me";
+      if (t.includes("direit")) return "md";
+      if (t.includes("ofensiv")) return "mo";
+      if (t.includes("central") || t.includes("centro")) return "mc";
+      return "mei";
+    }
+
+    // ataque: variantes antes do generico
+    if (t.includes("centroavante") || t.includes("centro avante")) return "ca";
+    if (t.includes("ponta") || t.includes("extremo")) {
+      if (t.includes("esquerd")) return "pe";
+      if (t.includes("direit")) return "pd";
       return "ata";
-    if (t.includes("goleiro")) return "gol";
-    return "ld";
+    }
+    if (/\b2 ?o? ?atacante\b/.test(t) || t.includes("segundo atacante")) return "sa";
+    if (t.includes("atacante") || t.includes("avancado")) return "ata";
+
+    return "";                               // desconhecido: nao inventa
   };
 
-  const importarElenco = (linhas) => {
+  const importarElenco = (linhas, participantesReais) => {
     // A planilha não traz categoria; vale a que estiver selecionada no
     // radar de notícias. Profissional é o padrão.
     const catImport = filtroCat || catBusca || "pro";
@@ -1401,7 +1427,15 @@ function Painel() {
 
     commit({ clubes: [...mapa.values()] });
     if (daPlanilha) setFiltroComp(daPlanilha);
-    const posPrincipal = linhas.length ? posicaoParaId(linhas[0]._posicao) : "";
+    // a posicao que domina o resultado, nao a da primeira linha: um unico
+    // atleta sem ficha bastava para o seletor pular para outra posicao
+    const votos = new Map();
+    for (const l of linhas) {
+      const p = posicaoParaId(l._posicao);
+      if (p) votos.set(p, (votos.get(p) || 0) + 1);
+    }
+    const posPrincipal =
+      [...votos.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || filtroPos || "";
     if (posPrincipal) setFiltroPos(posPrincipal);
     setFiltroCat(catImport);
     setConsulta({ pos: posPrincipal, comp: daPlanilha, cat: catImport });
