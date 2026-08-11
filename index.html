@@ -793,15 +793,7 @@ function Painel() {
   /* Marca no seletor quais competições dá para extrair direto. */
   const temExtracao = (nome) => !!EDICOES_OGOL[nome];
 
-  /* Posições presentes nas fichas, com a contagem de cada uma. */
-  const posNoRanking = useMemo(() => {
-    const m = new Map();
-    for (const c of clubes) {
-      const k = c.posicao || "ld";
-      m.set(k, (m.get(k) || 0) + 1);
-    }
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
-  }, [clubes]);
+
 
   const importar = () => {
     const linhas = bulk.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -1915,9 +1907,9 @@ function Painel() {
               value={filtroPos}
               onChange={(e) => { setFiltroPos(e.target.value); setPagina(0); setAberto(null); }}
             >
-              <option value="">todas ({clubes.length})</option>
-              {posNoRanking.map(([id, n]) => (
-                <option key={id} value={id}>{rotuloPos(id)} ({n})</option>
+              <option value="">todas</option>
+              {POSICOES.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
               ))}
             </select>
           </div>
@@ -2162,8 +2154,9 @@ function Painel() {
           <div className="vazio">
             <h3>Nenhum clube nesta consulta</h3>
             <p>
-              Nada corresponde a esses filtros. Tente outra competição, ou use o
-              radar de notícias para trazer clubes que se movimentaram.
+              {edicaoAtual
+                ? `Você ainda não tem ${rotuloPos(filtroPos || "ld").toLowerCase()} de ${filtroComp}. Use o botão Puxar elenco do ogol para trazer os clubes com posição, jogos e minutos.`
+                : "Nada corresponde a esses filtros. Tente outra competição, ou use o radar de notícias para trazer clubes que se movimentaram."}
             </p>
             <button className="btn" onClick={() => { const n = novoClube(); commit({ clubes: [...clubes, n] }); setAberto(n.id); }}>Abrir a primeira ficha</button>
           </div>
