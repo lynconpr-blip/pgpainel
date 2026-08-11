@@ -285,6 +285,7 @@ const CLUBES_POR_COMPETICAO = {
    site: ele aparece na URL.
    ================================================================== */
 const EDICOES_OGOL = {
+  // profissional
   "Série C": "210279",
   "Paulista A2": "210093",
   "Paulista A3": "210256",
@@ -293,6 +294,31 @@ const EDICOES_OGOL = {
   "Mineiro Módulo I": "209315",
   "Mineiro Módulo II": "210174",
   "Capixaba Série A": "210101",
+
+  // base — a categoria é deduzida do nome, ver CATEGORIA_POR_NOME
+  "Brasileiro Sub-20": "212869",
+  "Copa do Brasil Sub-20": "206052",
+  "Copinha": "209727",
+  "Paulista Sub-20": "218614",
+  "Carioca Sub-20": "220053",
+  "Copa Rio Sub-20": "212442",
+  "Mineiro Sub-20": "212517",
+  "Gaúcho Sub-20": "214484",
+  "Paranaense Sub-20": "213361",
+  "Catarinense Sub-20": "212563",
+  "Baiano Sub-20": "213242",
+  "Goiano Sub-20": "213200",
+};
+
+/** A categoria que o nome da competição indica, se indicar alguma. */
+const categoriaPeloNome = (nome) => {
+  const t = (nome || "").toLowerCase();
+  if (t.includes("copinha")) return "sub20";
+  for (const c of ["sub-20", "sub 20", "sub20"]) if (t.includes(c)) return "sub20";
+  for (const c of ["sub-17", "sub 17", "sub17"]) if (t.includes(c)) return "sub17";
+  for (const c of ["sub-15", "sub 15", "sub15"]) if (t.includes(c)) return "sub15";
+  for (const c of ["sub-23", "sub 23", "sub23"]) if (t.includes(c)) return "sub23";
+  return "";
 };
 
 /* A API aceita esta lista fechada de posições; o painel usa códigos
@@ -1931,7 +1957,16 @@ function Painel() {
             <label>Competição</label>
             <select
               value={filtroComp}
-              onChange={(e) => { setFiltroComp(e.target.value); setPagina(0); setAberto(null); }}
+              onChange={(e) => {
+                const nome = e.target.value;
+                setFiltroComp(nome);
+                // Copinha e afins são de base: ajusta a categoria sozinho,
+                // senão a extração cairia como profissional.
+                const cat = categoriaPeloNome(nome);
+                if (cat) setFiltroCat(cat);
+                setPagina(0);
+                setAberto(null);
+              }}
             >
               <option value="">todas</option>
               {compsNoRanking.map((c) => (
