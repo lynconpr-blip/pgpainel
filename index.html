@@ -810,11 +810,24 @@ function Painel() {
      inalcançável — você precisaria da ficha para criar a ficha. */
   const compsNoRanking = useMemo(() => {
     const nasFichas = new Set(clubes.map((c) => c.competicao).filter(Boolean));
-    const comId = Object.keys(EDICOES_OGOL);
-    return [...new Set([...nasFichas, ...comId])].sort((a, b) =>
-      a.localeCompare(b, "pt-BR")
-    );
-  }, [clubes]);
+    const todas = [...new Set([...nasFichas, ...Object.keys(EDICOES_OGOL)])];
+
+    // A categoria escolhida filtra a lista: pedindo Sub-20, só competições
+    // de Sub-20; pedindo Profissional, só as que não são de base. Uma
+    // competição já usada em alguma ficha vale pela categoria da ficha,
+    // mesmo que o nome não diga nada.
+    const catDaFicha = new Map();
+    for (const c of clubes) {
+      if (c.competicao) catDaFicha.set(c.competicao, c.categoria || "pro");
+    }
+
+    const categoriaDe = (nome) =>
+      categoriaPeloNome(nome) || catDaFicha.get(nome) || "pro";
+
+    return todas
+      .filter((nome) => !filtroCat || categoriaDe(nome) === filtroCat)
+      .sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [clubes, filtroCat]);
 
   /* Marca no seletor quais competições dá para extrair direto. */
   const temExtracao = (nome) => !!EDICOES_OGOL[nome];
@@ -1944,7 +1957,22 @@ function Painel() {
             <label>Categoria</label>
             <select
               value={filtroCat}
-              onChange={(e) => { setFiltroCat(e.target.value); setPagina(0); setAberto(null); }}
+              onChange={(e) => {
+                const cat = e.target.value;
+                setFiltroCat(cat);
+                // Se a competição escolhida não pertence à nova categoria,
+                // limpa — senão ficaria selecionada uma opção invisível.
+                if (filtroComp && cat) {
+                  const daFicha = clubes.find((c) => c.competicao === filtroComp);
+                  const catComp =
+                    categoriaPeloNome(filtroComp) ||
+                    (daFicha && daFicha.categoria) ||
+                    "pro";
+                  if (catComp !== cat) setFiltroComp("");
+                }
+                setPagina(0);
+                setAberto(null);
+              }}
             >
               <option value="">todas</option>
               {CATEGORIAS.map((c) => (
