@@ -661,8 +661,8 @@ function Painel() {
   const [filtroPos, setFiltroPos] = useState("");
   const [filtroCat, setFiltroCat] = useState("");
   const [filtroComp, setFiltroComp] = useState("");
+  const [aba, setAba] = useState("mercado");
   const [consulta, setConsulta] = useState(null);
-  const [verAtletas, setVerAtletas] = useState(false);
   const [atletaFoco, setAtletaFoco] = useState("");
   const [bidTexto, setBidTexto] = useState("");
   const [colarBid, setColarBid] = useState(false);
@@ -1106,7 +1106,7 @@ function Painel() {
   const adicionarAtleta = () => {
     const novo = novoAtleta();
     commit({ atletas: [...atletas, novo] });
-    setVerAtletas(true);
+    setAba("atletas");
     return novo;
   };
 
@@ -1688,6 +1688,16 @@ function Painel() {
 
         .linha { height:1px; background:rgba(255,255,255,.16); margin:22px 0 18px; }
 
+        .abas { display:flex; gap:4px; margin:18px 0 20px; border-bottom:1px solid rgba(255,255,255,.16); }
+        .aba { background:transparent; border:none; border-bottom:3px solid transparent;
+          color:#93AB9E; padding:9px 16px 8px; cursor:pointer; font-family:'Barlow Condensed',sans-serif;
+          font-weight:700; text-transform:uppercase; letter-spacing:.1em; font-size:14px;
+          margin-bottom:-1px; }
+        .aba:hover { color:${C.giz}; }
+        .aba.ativa { color:${C.amber}; border-bottom-color:${C.amber}; }
+        .janelaResumo { font-size:13px; color:#A9BFB2; margin-bottom:12px;
+          border-left:2px solid rgba(255,255,255,.2); padding-left:9px; }
+        .janelaResumo b { color:${C.giz}; }
         .secao { font-family:'Archivo Black',sans-serif; font-size:clamp(17px,3.4vw,23px);
           letter-spacing:-.005em; margin:0 0 12px; padding-left:13px; position:relative; color:#fff; }
         .secao::before { content:""; position:absolute; left:0; top:.12em; bottom:.12em;
@@ -1844,200 +1854,24 @@ function Painel() {
 
         <div className="linha" />
 
-        <h2 className="secao">Radar de janelas</h2>
-        <div className="radar">
-          {comps.map((c) => {
-            const d = dias(c.janela);
-            const tom =
-              d === null ? "#93AB9E" : d < 0 ? "#7C7C74" : d <= 14 ? C.alerta : d <= 40 ? C.amber : C.calma;
-            const fixa = c.grupo === "Nacional";
-            return (
-              <div className="comp" key={c.id}>
-                <div className="compTopo">
-                  <h3>{c.nome}</h3>
-                  {!fixa && (
-                    <button
-                      className="compFora"
-                      title="tirar do radar"
-                      onClick={() => commit({ comps: comps.filter((x) => x.id !== c.id) })}
-                    >×</button>
-                  )}
-                </div>
-                <div className="compUf">{c.grupo}</div>
-                <div className="contagem" style={{ color: tom }}>
-                  {d === null ? "—" : d < 0 ? "fechada" : `${d} d`}
-                </div>
-                <input
-                  type="date"
-                  value={c.janela}
-                  aria-label={`Data-limite de inscrição — ${c.nome}`}
-                  onChange={(e) =>
-                    commit({ comps: comps.map((x) => (x.id === c.id ? { ...x, janela: e.target.value } : x)) })
-                  }
-                />
-              </div>
-            );
-          })}
+        <div className="abas">
+          {[
+            { id: "mercado", label: "Mercado" },
+            { id: "atletas", label: `Meus atletas${atletas.length ? " (" + atletas.length + ")" : ""}` },
+            { id: "base", label: "Configuração" },
+          ].map((a) => (
+            <button
+              key={a.id}
+              className={"aba" + (aba === a.id ? " ativa" : "")}
+              onClick={() => setAba(a.id)}
+              aria-current={aba === a.id ? "page" : undefined}
+            >{a.label}</button>
+          ))}
         </div>
 
-        <div className="addComp">
-          <select value={ufSel} onChange={(e) => { setUfSel(e.target.value); setCompSel(""); }}>
-            <option value="">Adicionar estadual — escolha a UF</option>
-            {UFS.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
+        {aba === "mercado" && (
+          <>
 
-          {ufSel && (
-            <select value={compSel} onChange={(e) => setCompSel(e.target.value)}>
-              <option value="">competição…</option>
-              {ESTADUAIS[ufSel]
-                .filter((n) => !comps.some((c) => c.nome === n && c.grupo === ufSel))
-                .map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          )}
-
-          {compSel && (
-            <button
-              className="btn"
-              onClick={() => {
-                commit({
-                  comps: [...comps, {
-                    id: `${ufSel}-${compSel}`.replace(/\s+/g, "-").toLowerCase(),
-                    nome: compSel, grupo: ufSel, janela: "",
-                  }],
-                });
-                setCompSel("");
-              }}
-            >Colocar no radar</button>
-          )}
-
-          <button className="btn ghost" onClick={() => setOutra(!outra)}>
-            {outra ? "cancelar" : "outra competição"}
-          </button>
-        </div>
-
-        {outra && (
-          <div className="addComp">
-            <input
-              className="busca"
-              placeholder="Nome da competição que faltou"
-              value={outraNome}
-              onChange={(e) => setOutraNome(e.target.value)}
-            />
-            <button
-              className="btn"
-              onClick={() => {
-                if (!outraNome.trim()) return;
-                commit({
-                  comps: [...comps, {
-                    id: "x-" + Math.random().toString(36).slice(2, 8),
-                    nome: outraNome.trim(), grupo: ufSel || "outra", janela: "",
-                  }],
-                });
-                setOutraNome("");
-                setOutra(false);
-              }}
-            >Adicionar</button>
-          </div>
-        )}
-
-        <div className="linha" />
-
-        <h2 className="secao" style={{ marginTop: 26 }}>
-          Meus atletas
-          <button
-            className="btnSecao"
-            onClick={() => setVerAtletas(!verAtletas)}
-          >{verAtletas ? "esconder" : `ver (${atletas.length})`}</button>
-        </h2>
-
-        {verAtletas && (
-          <div className="carteira">
-            {atletas.length === 0 && (
-              <p className="carteiraVazia">
-                Cadastre quem você representa. Cada ficha de clube passa a
-                mostrar quais dos seus atletas se encaixam ali.
-              </p>
-            )}
-
-            {atletas.map((a) => (
-              <div className="atleta" key={a.id}>
-                <div className="atletaLinha">
-                  <input
-                    className="atletaNome"
-                    placeholder="nome do atleta"
-                    value={a.nome}
-                    onChange={(e) => editarAtleta(a.id, "nome", e.target.value)}
-                  />
-                  <select
-                    value={a.posicao}
-                    onChange={(e) => editarAtleta(a.id, "posicao", e.target.value)}
-                  >
-                    {POSICOES.map((p) => (
-                      <option key={p.id} value={p.id}>{p.label}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={a.categoria}
-                    onChange={(e) => editarAtleta(a.id, "categoria", e.target.value)}
-                  >
-                    {CATEGORIAS.map((c) => (
-                      <option key={c.id} value={c.id}>{c.label}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={a.situacao}
-                    onChange={(e) => editarAtleta(a.id, "situacao", e.target.value)}
-                  >
-                    {SITUACOES.map((x) => (
-                      <option key={x.v} value={x.v}>{x.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="atletaLinha">
-                  <input
-                    placeholder="último clube"
-                    value={a.ultimo_clube}
-                    onChange={(e) => editarAtleta(a.id, "ultimo_clube", e.target.value)}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="3"
-                    placeholder="contratos no ano"
-                    title="limite legal: 3 por ano"
-                    value={a.contratos_no_ano}
-                    onChange={(e) =>
-                      editarAtleta(a.id, "contratos_no_ano", e.target.value)
-                    }
-                  />
-                  <input
-                    className="atletaNotas"
-                    placeholder="observações"
-                    value={a.notas}
-                    onChange={(e) => editarAtleta(a.id, "notas", e.target.value)}
-                  />
-                  <button
-                    className="ldFora"
-                    title="remover atleta"
-                    onClick={() => removerAtleta(a.id)}
-                  >×</button>
-                </div>
-
-                {Number(a.contratos_no_ano) >= 3 && (
-                  <div className="atletaAviso">
-                    Já assinou 3 contratos este ano — o limite da lei.
-                    Novo vínculo só na virada da temporada.
-                  </div>
-                )}
-              </div>
-            ))}
-
-            <button className="btn" onClick={adicionarAtleta}>+ atleta</button>
-          </div>
-        )}
-
-        <h2 className="secao" style={{ marginTop: 26 }}>Clubes no radar</h2>
 
         {atletas.length > 0 && (
           <div className="foco">
@@ -2166,30 +2000,30 @@ function Painel() {
           )}
         </div>
 
+        {filtroComp && (() => {
+          const c = comps.find((x) => x.nome === filtroComp);
+          const d = c ? dias(c.janela) : null;
+          if (!c) return null;
+          const tom = d === null ? "#93AB9E" : d < 0 ? "#7C7C74" : d <= 14 ? C.alerta : C.amber;
+          return (
+            <div className="janelaResumo">
+              <b>{filtroComp}</b>{" "}
+              {d === null
+                ? "— sem data de inscrição preenchida (defina em Configuração)"
+                : d < 0
+                ? "— janela de inscrição fechada"
+                : `— inscrições fecham em ${d} dia(s)`}
+              <span style={{ color: tom }}> ●</span>
+            </div>
+          );
+        })()}
         <div className="barra">
           <input className="busca" placeholder="Filtrar por clube, UF, competição…" value={filtro} onChange={(e) => { setFiltro(e.target.value); setPagina(0); }} />
           <button className="btn" onClick={() => { const n = novoClube(); commit({ clubes: [...clubes, n] }); setAberto(n.id); }}>Adicionar clube</button>
           <button className="btn" onClick={() => setPopBusca(!popBusca)} disabled={buscando}>
             {buscando ? "buscando…" : "Buscar notícias"}
           </button>
-          <button className="btn ghost" onClick={() => setColando(!colando)}>Colar lista</button>
-          <label className="btn ghost" style={{ cursor: "pointer" }}>
-            Importar CSV dos scripts
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              style={{ display: "none" }}
-              onChange={(e) => { const f = e.target.files[0]; if (f) importarCSV(f); e.target.value = ""; }}
-            />
-          </label>
-          <button className="btn ghost" onClick={exportar}>Exportar CSV</button>
-          <button className="btn ghost" onClick={baixarBackup}>Backup</button>
-          <button
-            className="btn ghost"
-            onClick={() => { setColarBackup(!colarBackup); setBackupTexto(""); }}
-          >{colarBackup ? "cancelar" : "Restaurar"}</button>
         </div>
-
         {popBusca && (
           <div className="popBusca">
             <div className="popTitulo">Radar de notícias</div>
@@ -2286,76 +2120,6 @@ function Painel() {
           </div>
         )}
 
-        {backupTexto && (
-          <div className="caixaBackup">
-            <div className="eyebrow" style={{ marginBottom: 6 }}>
-              Seu backup — selecione tudo e copie (Ctrl+A, Ctrl+C dentro da caixa)
-            </div>
-            <textarea
-              className="bulk"
-              readOnly
-              value={backupTexto}
-              onFocus={(e) => e.target.select()}
-              style={{ minHeight: 90, fontFamily: "monospace", fontSize: 11.5 }}
-            />
-            <div className="addComp">
-              <button
-                className="btn"
-                onClick={() => {
-                  navigator.clipboard
-                    ? navigator.clipboard.writeText(backupTexto).then(
-                        () => setAviso("Backup copiado"),
-                        () => setAviso("Copie manualmente: clique na caixa e use Ctrl+C")
-                      )
-                    : setAviso("Copie manualmente: clique na caixa e use Ctrl+C");
-                }}
-              >Copiar</button>
-              <button className="btn ghost" onClick={() => setBackupTexto("")}>fechar</button>
-            </div>
-          </div>
-        )}
-
-        {colarBackup && (
-          <div className="caixaBackup">
-            <div className="eyebrow" style={{ marginBottom: 6 }}>
-              Cole aqui o backup e restaure
-            </div>
-            <textarea
-              className="bulk"
-              placeholder='Cole o texto do backup, começando com {"versao":1...'
-              value={textoColado}
-              onChange={(e) => setTextoColado(e.target.value)}
-              style={{ minHeight: 90, fontFamily: "monospace", fontSize: 11.5 }}
-            />
-            <div className="addComp">
-              <button
-                className="btn"
-                onClick={() => textoColado.trim() && restaurarBackup(textoColado.trim())}
-              >Restaurar</button>
-              <label className="btn ghost" style={{ cursor: "pointer" }}>
-                ou escolher arquivo
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  style={{ display: "none" }}
-                  onChange={(e) => { const f = e.target.files[0]; if (f) restaurarBackup(f); e.target.value = ""; }}
-                />
-              </label>
-            </div>
-          </div>
-        )}
-
-        {colando && (
-          <div style={{ marginBottom: 14 }}>
-            <textarea
-              className="bulk"
-              placeholder={"Um clube por linha. Opcional: clube; UF; competição\n\nCarlos Renaux; SC; Copa Santa Catarina\nInter de Limeira; SP; Copa Paulista"}
-              value={bulk}
-              onChange={(e) => setBulk(e.target.value)}
-            />
-            <button className="btn" style={{ marginTop: 8 }} onClick={importar}>Criar fichas</button>
-          </div>
-        )}
 
         {puxando && (
           <div className="eyebrow" style={{ color: C.amber, marginBottom: 10 }}>
@@ -2688,6 +2452,290 @@ function Painel() {
               disabled={pagAtual >= paginas - 1}
             >seguintes →</button>
           </div>
+        )}
+
+          </>
+        )}
+
+        {aba === "atletas" && (
+          <>
+        <div className="carteira">
+            {atletas.length === 0 && (
+              <p className="carteiraVazia">
+                Cadastre quem você representa. Cada ficha de clube passa a
+                mostrar quais dos seus atletas se encaixam ali.
+              </p>
+            )}
+
+            {atletas.map((a) => (
+              <div className="atleta" key={a.id}>
+                <div className="atletaLinha">
+                  <input
+                    className="atletaNome"
+                    placeholder="nome do atleta"
+                    value={a.nome}
+                    onChange={(e) => editarAtleta(a.id, "nome", e.target.value)}
+                  />
+                  <select
+                    value={a.posicao}
+                    onChange={(e) => editarAtleta(a.id, "posicao", e.target.value)}
+                  >
+                    {POSICOES.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={a.categoria}
+                    onChange={(e) => editarAtleta(a.id, "categoria", e.target.value)}
+                  >
+                    {CATEGORIAS.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={a.situacao}
+                    onChange={(e) => editarAtleta(a.id, "situacao", e.target.value)}
+                  >
+                    {SITUACOES.map((x) => (
+                      <option key={x.v} value={x.v}>{x.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="atletaLinha">
+                  <input
+                    placeholder="último clube"
+                    value={a.ultimo_clube}
+                    onChange={(e) => editarAtleta(a.id, "ultimo_clube", e.target.value)}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="3"
+                    placeholder="contratos no ano"
+                    title="limite legal: 3 por ano"
+                    value={a.contratos_no_ano}
+                    onChange={(e) =>
+                      editarAtleta(a.id, "contratos_no_ano", e.target.value)
+                    }
+                  />
+                  <input
+                    className="atletaNotas"
+                    placeholder="observações"
+                    value={a.notas}
+                    onChange={(e) => editarAtleta(a.id, "notas", e.target.value)}
+                  />
+                  <button
+                    className="ldFora"
+                    title="remover atleta"
+                    onClick={() => removerAtleta(a.id)}
+                  >×</button>
+                </div>
+
+                {Number(a.contratos_no_ano) >= 3 && (
+                  <div className="atletaAviso">
+                    Já assinou 3 contratos este ano — o limite da lei.
+                    Novo vínculo só na virada da temporada.
+                  </div>
+                )}
+              </div>
+            ))}
+
+          <button className="btn" onClick={adicionarAtleta}>+ atleta</button>
+        </div>
+          </>
+        )}
+
+        {aba === "base" && (
+          <>
+        <h2 className="secao">Radar de janelas</h2>
+        <div className="radar">
+          {comps.map((c) => {
+            const d = dias(c.janela);
+            const tom =
+              d === null ? "#93AB9E" : d < 0 ? "#7C7C74" : d <= 14 ? C.alerta : d <= 40 ? C.amber : C.calma;
+            const fixa = c.grupo === "Nacional";
+            return (
+              <div className="comp" key={c.id}>
+                <div className="compTopo">
+                  <h3>{c.nome}</h3>
+                  {!fixa && (
+                    <button
+                      className="compFora"
+                      title="tirar do radar"
+                      onClick={() => commit({ comps: comps.filter((x) => x.id !== c.id) })}
+                    >×</button>
+                  )}
+                </div>
+                <div className="compUf">{c.grupo}</div>
+                <div className="contagem" style={{ color: tom }}>
+                  {d === null ? "—" : d < 0 ? "fechada" : `${d} d`}
+                </div>
+                <input
+                  type="date"
+                  value={c.janela}
+                  aria-label={`Data-limite de inscrição — ${c.nome}`}
+                  onChange={(e) =>
+                    commit({ comps: comps.map((x) => (x.id === c.id ? { ...x, janela: e.target.value } : x)) })
+                  }
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="addComp">
+          <select value={ufSel} onChange={(e) => { setUfSel(e.target.value); setCompSel(""); }}>
+            <option value="">Adicionar estadual — escolha a UF</option>
+            {UFS.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+
+          {ufSel && (
+            <select value={compSel} onChange={(e) => setCompSel(e.target.value)}>
+              <option value="">competição…</option>
+              {ESTADUAIS[ufSel]
+                .filter((n) => !comps.some((c) => c.nome === n && c.grupo === ufSel))
+                .map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
+
+          {compSel && (
+            <button
+              className="btn"
+              onClick={() => {
+                commit({
+                  comps: [...comps, {
+                    id: `${ufSel}-${compSel}`.replace(/\s+/g, "-").toLowerCase(),
+                    nome: compSel, grupo: ufSel, janela: "",
+                  }],
+                });
+                setCompSel("");
+              }}
+            >Colocar no radar</button>
+          )}
+
+          <button className="btn ghost" onClick={() => setOutra(!outra)}>
+            {outra ? "cancelar" : "outra competição"}
+          </button>
+        </div>
+
+        {outra && (
+          <div className="addComp">
+            <input
+              className="busca"
+              placeholder="Nome da competição que faltou"
+              value={outraNome}
+              onChange={(e) => setOutraNome(e.target.value)}
+            />
+            <button
+              className="btn"
+              onClick={() => {
+                if (!outraNome.trim()) return;
+                commit({
+                  comps: [...comps, {
+                    id: "x-" + Math.random().toString(36).slice(2, 8),
+                    nome: outraNome.trim(), grupo: ufSel || "outra", janela: "",
+                  }],
+                });
+                setOutraNome("");
+                setOutra(false);
+              }}
+            >Adicionar</button>
+          </div>
+        )}
+
+        <div className="linha" />
+        <h2 className="secao" style={{ marginTop: 26 }}>Dados</h2>
+
+        <div className="barra">
+          <button className="btn ghost" onClick={() => setColando(!colando)}>Colar lista de clubes</button>
+          <label className="btn ghost" style={{ cursor: "pointer" }}>
+            Importar CSV
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files[0]; if (f) importarCSV(f); e.target.value = ""; }}
+            />
+          </label>
+          <button className="btn ghost" onClick={exportar}>Exportar CSV</button>
+          <button className="btn ghost" onClick={baixarBackup}>Backup</button>
+          <button
+            className="btn ghost"
+            onClick={() => { setColarBackup(!colarBackup); setBackupTexto(""); }}
+          >{colarBackup ? "cancelar" : "Restaurar"}</button>
+        </div>
+        {colando && (
+          <div style={{ marginBottom: 14 }}>
+            <textarea
+              className="bulk"
+              placeholder={"Um clube por linha. Opcional: clube; UF; competição\n\nCarlos Renaux; SC; Copa Santa Catarina\nInter de Limeira; SP; Copa Paulista"}
+              value={bulk}
+              onChange={(e) => setBulk(e.target.value)}
+            />
+            <button className="btn" style={{ marginTop: 8 }} onClick={importar}>Criar fichas</button>
+          </div>
+        )}
+        {backupTexto && (
+          <div className="caixaBackup">
+            <div className="eyebrow" style={{ marginBottom: 6 }}>
+              Seu backup — selecione tudo e copie (Ctrl+A, Ctrl+C dentro da caixa)
+            </div>
+            <textarea
+              className="bulk"
+              readOnly
+              value={backupTexto}
+              onFocus={(e) => e.target.select()}
+              style={{ minHeight: 90, fontFamily: "monospace", fontSize: 11.5 }}
+            />
+            <div className="addComp">
+              <button
+                className="btn"
+                onClick={() => {
+                  navigator.clipboard
+                    ? navigator.clipboard.writeText(backupTexto).then(
+                        () => setAviso("Backup copiado"),
+                        () => setAviso("Copie manualmente: clique na caixa e use Ctrl+C")
+                      )
+                    : setAviso("Copie manualmente: clique na caixa e use Ctrl+C");
+                }}
+              >Copiar</button>
+              <button className="btn ghost" onClick={() => setBackupTexto("")}>fechar</button>
+            </div>
+          </div>
+        )}
+
+        {colarBackup && (
+          <div className="caixaBackup">
+            <div className="eyebrow" style={{ marginBottom: 6 }}>
+              Cole aqui o backup e restaure
+            </div>
+            <textarea
+              className="bulk"
+              placeholder='Cole o texto do backup, começando com {"versao":1...'
+              value={textoColado}
+              onChange={(e) => setTextoColado(e.target.value)}
+              style={{ minHeight: 90, fontFamily: "monospace", fontSize: 11.5 }}
+            />
+            <div className="addComp">
+              <button
+                className="btn"
+                onClick={() => textoColado.trim() && restaurarBackup(textoColado.trim())}
+              >Restaurar</button>
+              <label className="btn ghost" style={{ cursor: "pointer" }}>
+                ou escolher arquivo
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  style={{ display: "none" }}
+                  onChange={(e) => { const f = e.target.files[0]; if (f) restaurarBackup(f); e.target.value = ""; }}
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
+          </>
         )}
 
         {erro && <p style={{ color: C.alerta, marginTop: 14, fontSize: 13.5 }}>{erro}</p>}
