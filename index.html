@@ -226,6 +226,12 @@ const ESTADUAIS = {
 
 const UFS = Object.keys(ESTADUAIS);
 
+/* Todos os nomes oficiais de competição que o painel conhece. */
+const CATALOGO_COMPETICOES = [
+  ...NACIONAIS.map((n) => n.nome),
+  ...Object.values(ESTADUAIS).flat(),
+];
+
 /* ==================================================================
    PARTICIPANTES POR COMPETIÇÃO — edite à vontade.
 
@@ -294,7 +300,6 @@ const EDICOES_OGOL = {
   "Mineiro Módulo I": "209315",
   "Mineiro Módulo II": "210174",
   "Capixaba Série A": "210101",
-  "Copa Santa Catarina": "221082",
 
   // base — a categoria é deduzida do nome, ver CATEGORIA_POR_NOME
   "Brasileiro Sub-20": "212869",
@@ -310,6 +315,108 @@ const EDICOES_OGOL = {
   "Baiano Sub-20": "213242",
   "Goiano Sub-20": "213200",
 };
+
+/* ==================================================================
+   NOMES DE COMPETIÇÃO — uma grafia só.
+
+   A mesma competição chega com nomes diferentes: o ogol devolve
+   "Capixaba" e "Mineiro Mód. II" na ficha do atleta, enquanto o
+   catálogo aqui usa "Capixaba Série A" e "Mineiro Módulo II". Sem
+   unificar, o painel trata como competições distintas e o filtro
+   volta vazio.
+   ================================================================== */
+const APELIDOS_COMP = {
+  "capixaba": "Capixaba Série A",
+  "carioca": "Carioca Série A",
+  "mineiro": "Mineiro Módulo I",
+  "mineiro modulo ii": "Mineiro Módulo II",
+  "catarinense b": "Catarinense Série B",
+  "gaucho acesso": "Gaúcho Série A2 (Acesso)",
+  "capixaba sub 20": "Capixaba Sub-20",
+  "paulista sub 20": "Paulista Sub-20",
+  "carioca sub 20": "Carioca Sub-20",
+  "mineiro sub 20": "Mineiro Sub-20",
+  "gaucho sub 20": "Gaúcho Sub-20",
+  "paranaense sub 20": "Paranaense Sub-20",
+  "catarinense sub 20": "Catarinense Sub-20",
+  "baiano sub 20": "Baiano Sub-20",
+  "goiano sub 20": "Goiano Sub-20",
+  "brasileiro sub 20": "Brasileiro Sub-20",
+  "copa sao paulo": "Copinha",
+  "copa sao paulo de futebol junior": "Copinha",
+};
+
+/** Reduz um nome de competição à forma usada para comparar. */
+const chaveComp = (nome) =>
+  nomeSimples(nome)
+    .replace(/\bmod\.?\b/g, "modulo")
+    .replace(/\bs(\d{2})\b/g, "sub $1")
+    .replace(/\bsub-?(\d{2})\b/g, "sub $1")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** A grafia oficial de uma competição, quando reconhecida. */
+const canonizarComp = (nome) => {
+  const bruto = (nome || "").trim();
+  if (!bruto) return "";
+  const k = chaveComp(bruto);
+
+  if (APELIDOS_COMP[k]) return APELIDOS_COMP[k];
+
+  // Bate com alguma competição do catálogo, ignorando acento e abreviação?
+  for (const oficial of CATALOGO_COMPETICOES) {
+    if (chaveComp(oficial) === k) return oficial;
+  }
+  return bruto;
+};
+
+/**
+ * Passa todas as fichas para a grafia oficial e funde as que viraram
+ * a mesma coisa. Duas fichas do mesmo clube, posição e categoria que
+ * só diferiam no nome da competição passam a ser uma só: fica o
+ * elenco mais completo, e os sinais das duas somam.
+ */
+function unificarCompeticoes(clubes) {
+  const porChave = new Map();
+
+  for (const bruto of clubes) {
+    const c = { ...bruto, competicao: canonizarComp(bruto.competicao) };
+    const k = chaveFicha(c.clube, c.posicao, c.categoria) + "|" + c.competicao;
+
+    const atual = porChave.get(k);
+    if (!atual) {
+      porChave.set(k, c);
+      continue;
+    }
+
+    // Elenco: fica o que tem mais atletas — o outro é resquício.
+    if ((c.laterais || []).length > (atual.laterais || []).length) {
+      atual.laterais = c.laterais;
+      atual.lds = c.lds;
+    }
+
+    // Sinais somam, sem repetir.
+    const vistos = new Set((atual.sinais || []).map((x) => x.fonte + "|" + x.texto));
+    for (const sig of c.sinais || []) {
+      if (!vistos.has(sig.fonte + "|" + sig.texto)) (atual.sinais ||= []).push(sig);
+    }
+
+    // O que você escreveu à mão nunca se perde.
+    for (const campo of ["notas", "titular", "janelaAte", "ultimoContato",
+                         "proximo", "uf"]) {
+      if (!atual[campo] && c[campo]) atual[campo] = c[campo];
+    }
+    if (atual.resposta === "nao_contatado" && c.resposta !== "nao_contatado") {
+      atual.resposta = c.resposta;
+    }
+    if (atual.statusTitular === "desconhecido" && c.statusTitular !== "desconhecido") {
+      atual.statusTitular = c.statusTitular;
+    }
+  }
+
+  return [...porChave.values()];
+}
 
 /** A categoria que o nome da competição indica, se indicar alguma. */
 const categoriaPeloNome = (nome) => {
@@ -727,7 +834,7 @@ function Painel() {
         const r = await window.storage.get("painel-ld");
         if (r && vivo) {
           const d = JSON.parse(r.value);
-          setClubes(d.clubes || []);
+          setClubes(unificarCompeticoes(d.clubes || []));
           setAtletas(d.atletas || []);
           setComps(comNacionais(d.comps));
         }
@@ -1301,8 +1408,9 @@ function Painel() {
         contagem.set(nome, (contagem.get(nome) || 0) + 1);
       }
     }
-    const daPlanilha =
-      [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+    const daPlanilha = canonizarComp(
+      [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ""
+    );
 
     const mapa = new Map(
       clubes.map((c) => [chaveFicha(c.clube, c.posicao, c.categoria), { ...c }])
