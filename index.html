@@ -70,7 +70,9 @@ window.PG_OGOL = URL_OGOL.replace(/\/+$/, "");
    segunda tentativa antes de desistir — sem isso o painel ficaria
    preso em "Abrindo o quadro…" ou acusaria falha à toa. */
 async function buscarComPrazo(url, opcoes, segundos) {
-  var prazo = (segundos || 35) * 1000;
+  // A base cresceu: com centenas de fichas a planilha demora mais para
+  // montar a resposta. Prazo largo e três tentativas.
+  var prazo = (segundos || 90) * 1000;
 
   async function tentar(ms) {
     var ctrl = new AbortController();
@@ -82,15 +84,19 @@ async function buscarComPrazo(url, opcoes, segundos) {
     }
   }
 
-  try {
-    return await tentar(prazo);
-  } catch (e) {
-    if (e && e.name === "AbortError") {
-      bandeira("A planilha está acordando — tentando de novo…", "ok");
-      return await tentar(prazo);   // segunda e última tentativa
+  var ultima;
+  for (var n = 1; n <= 3; n++) {
+    try {
+      return await tentar(prazo);
+    } catch (e) {
+      ultima = e;
+      if (!(e && e.name === "AbortError")) throw e;
+      if (n < 3) {
+        bandeira("A planilha está demorando — tentativa " + (n + 1) + " de 3…", "ok");
+      }
     }
-    throw e;
   }
+  throw ultima;
 }
 
 window.storage = {
@@ -104,7 +110,14 @@ window.storage = {
     }
 
     try {
-      var r = await buscarComPrazo(URL_PLANILHA, { method: "GET" }, 35);
+      // Leitura por POST, não por GET. O GET do Apps Script responde por
+      // um endereço temporário que exige sessão do navegador e devolve
+      // 404 quando a chamada vem de outra origem.
+      var r = await buscarComPrazo(URL_PLANILHA, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ acao: "ler" })
+      }, 90);
       var j = await r.json();
       if (!j.ok) throw new Error(j.erro || "resposta inválida");
 
@@ -114,8 +127,8 @@ window.storage = {
     } catch (e) {
       bandeira(
         (e && e.name === "AbortError"
-          ? "A planilha não respondeu em dois minutos. "
-          : "Sem conexão com a planilha. ") +
+          ? "A planilha não respondeu em 4 minutos — pode estar grande demais. "
+          : "Sem conexão com a planilha (" + (e && e.message ? e.message : "erro de rede") + "). ") +
         "Mostrando a última cópia deste computador — NÃO edite até reconectar.",
         "erro"
       );
@@ -136,7 +149,7 @@ window.storage = {
         // text/plain evita a checagem prévia que o Apps Script não responde
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ dados: JSON.parse(valor) })
-      }, 35);
+      }, 90);
       var j = await r.json();
       if (!j.ok) throw new Error(j.erro || "falha ao gravar");
       bandeira("Salvo na planilha", "ok");
@@ -827,7 +840,7 @@ function Painel() {
         setCarregando(false);
         setErro("A planilha não respondeu. Recarregue a página — o Apps Script costuma acordar na segunda tentativa.");
       }
-    }, 100000);
+    }, 300000);
 
     (async () => {
       try {
