@@ -395,7 +395,7 @@ function unificarCompeticoes(clubes) {
 
   for (const bruto of clubes) {
     const c = { ...bruto, competicao: canonizarComp(bruto.competicao) };
-    const k = chaveFicha(c.clube, c.posicao, c.categoria) + "|" + c.competicao;
+    const k = chaveFicha(c.clube, c.posicao, c.categoria, c.competicao);
 
     const atual = porChave.get(k);
     if (!atual) {
@@ -522,8 +522,9 @@ const novoAtleta = () => ({
    radar por lateral-direito profissional e por goleiro sub-20, com
    elencos, notas e pontuações separados. Fichas antigas, sem categoria,
    contam como profissional. */
-const chaveFicha = (nome, pos, cat) =>
-  normNome(nome) + "|" + (pos || "ld") + "|" + (cat || "pro");
+const chaveFicha = (nome, pos, cat, comp) =>
+  normNome(nome) + "|" + (pos || "ld") + "|" + (cat || "pro") +
+  (comp === undefined ? "" : "|" + (comp || ""));
 
 const rotuloCat = (id) =>
   (CATEGORIAS.find((c) => c.id === id) || {}).label || "";
@@ -1425,8 +1426,13 @@ function Painel() {
       [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ""
     );
 
+    // A competição entra na chave: um clube pode disputar duas ao mesmo
+    // tempo, com minutagens diferentes em cada uma.
     const mapa = new Map(
-      clubes.map((c) => [chaveFicha(c.clube, c.posicao, c.categoria), { ...c }])
+      clubes.map((c) => [
+        chaveFicha(c.clube, c.posicao, c.categoria, c.competicao),
+        { ...c },
+      ])
     );
     const tocadas = new Set();
     let criadas = 0, atletas = 0;
@@ -1437,7 +1443,7 @@ function Painel() {
       if (!clube || !nome) continue;
 
       const pos = posicaoParaId(l._posicao);
-      const k = chaveFicha(clube, pos, catImport);
+      const k = chaveFicha(clube, pos, catImport, daPlanilha);
 
       let c = mapa.get(k);
       if (!c) {
@@ -1496,7 +1502,7 @@ function Painel() {
     for (const item of participantes) {
       const nomeClube = typeof item === "string" ? item : item.nome;
       for (const pos of posicoesDaPlanilha) {
-        const k = chaveFicha(nomeClube, pos, catImport);
+        const k = chaveFicha(nomeClube, pos, catImport, daPlanilha);
         if (mapa.has(k)) continue;
         const c = {
           ...novoClube(),
